@@ -1,0 +1,54 @@
+schema: spec-driven
+
+context: |
+  isolait: Go CLI + daemon that runs AI coding agents (Claude Code, OpenCode, ...)
+  in a dynamic, zero-trust sandbox on Linux and Windows (WSL2). Binary and CLI
+  are named `isolait` (formerly `agent-box`; never use the old name).
+
+  Threat model: malicious dependency hooks, indirect prompt injection (reading
+  ~/.ssh, creds, env), data exfiltration over the network, abuse of local
+  infrastructure (docker.sock, localhost services). Security decisions default
+  to deny; every permission is an explicit, user-granted, revocable grant.
+
+  Fixed stack: Go (single static binary), bubblewrap (bwrap) for rootless
+  namespaces, nsenter for hot-plugging into running sandboxes, cobra (CLI),
+  gVisor netstack + miekg/dns (user-space network tier). No hypervisor/VM.
+
+  Constraints:
+  - Rootless: unprivileged user namespaces, CAP_SYS_ADMIN dropped; host system
+    paths (/usr, /lib, /bin) read-only; only designated workdirs read-write;
+    /tmp and hot-plug slots are tmpfs.
+  - Hot-plug (dirs, unix sockets, /dev nodes, ports) must not restart the
+    session or lose agent context.
+  - Two network tiers: Tier A kernel netns + iptables/nftables (default, raw
+    IP/CIDR/port rules); Tier B TUN + gVisor netstack (domain/SNI/DNS rules).
+    Adding a domain rule auto-elevates A -> B.
+  - Must behave identically on native Linux and WSL2 (warn on /mnt/c paths;
+    usbipd-win helpers for USB).
+  - CLI surface: start, status, allow {port,socket,usb,domain}, mount [--ro].
+
+  Roadmap phases: 1 baseline bwrap engine + CLI; 2 nsenter hot-plugging;
+  3 hybrid networking; 4 WSL2 polish, logging, session recovery, packaging.
+  Scope each change to one phase.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
