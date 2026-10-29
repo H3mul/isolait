@@ -3,9 +3,10 @@
 Reproducible feasibility spikes for `phase1-sandbox-core`. Process is defined in
 `openspec/changes/phase1-sandbox-core/tasks.md` (group 1).
 
-Each spike: `<task#>-<slug>/{README.md,run.sh,test.sh}`. `./<dir>/run.sh` builds the shared
-image (`_common/`) and runs `test.sh` in a container; output is `PASS|FAIL|SKIP <criterion>`,
-exit 1 on any FAIL. `./run-all.sh` runs all of them.
+Build the shared image once: `./_common/build.sh` (slow on first run; extra args go to `docker build`).
+Each spike: `<task#>-<slug>/{README.md,run.sh,test.sh}`. `./<dir>/run.sh` runs `test.sh` in that
+prebuilt image (exit 2 if it is missing); output is `PASS|FAIL|SKIP <criterion>`, exit 1 on any FAIL.
+`./run-all.sh` builds, then runs all of them.
 
 Containers use `seccomp=unconfined apparmor=unconfined systempaths=unconfined`, not `--privileged`.
 Reproducibility: pass pinned digests via `--build-arg` (see `_common/Dockerfile`).
