@@ -1,17 +1,25 @@
 # Tasks
 
-## 1. Feasibility spikes (shell and throwaway Go, no product code)
+## 1. Feasibility spikes (documented, reproducible, containerised; no product code)
 
-- [ ] 1.1 Spike: with `unshare -Urm` + `bwrap`, verify a mount made in the broker ns under a shared `stage/` appears in the sandbox; record in `docs/spikes/mount-propagation.md`
-- [ ] 1.2 Spike: verify the sandbox cannot remount a propagated mount rw (`MNT_LOCKED`) and that unmount propagates; record in the same doc
-- [ ] 1.3 Spike: verify bwrap keeps `/workspaces` as a slave bind (or find the flag/wrapper); record in the same doc
-- [ ] 1.4 Spike: verify `open_tree` + `mount_setattr(RDONLY)` + `move_mount` yields a never-writable ro mount; record in the same doc
-- [ ] 1.5 Spike: verify `--disable-userns` works under the broker's extra userns nesting; record in `docs/spikes/userns.md`
-- [ ] 1.6 Spike: tap in a sandbox netns driven by gVisor netstack (TCP forward + DNS); measure throughput and latency against `pasta` with iperf3; run the matrix (API streaming, `npm install`, `git clone`, DNS, closed-port refusal); check `/dev/net/tun` and the gVisor build under Go 1.27; record in `docs/spikes/netstack.md`
-- [ ] 1.7 Spike: a locked thread can `setns` into the sandbox netns, listen on loopback, and forward to host loopback; record in `docs/spikes/netstack.md`
-- [ ] 1.8 Spike: PTY relay with `SIGWINCH` redraw against Claude Code (inline) and OpenCode (alt-screen); record in `docs/spikes/pty-relay.md`
-- [ ] 1.9 Spike: mask a subdirectory by layering an empty ro bind over a propagated workspace mount; verify it appears empty in the sandbox, survives hot-add, and unmounts cleanly with its parent; record in `docs/spikes/mount-propagation.md`
-- [ ] 1.10 Decide go/no-go for design Decisions 1 and 5; if either fails, update design.md to its fallback before continuing
+Process, applied to every spike:
+- Layout: `architecture/spikes/<task#>-<slug>/` holds `README.md` (question, approach, pass/fail criteria, how to run, recorded result with date, kernel and tool versions, verdict, and the design fallback if it fails), `run.sh` (host entry point: builds the image and runs the container) and `test.sh` (runs inside the container, prints one `PASS|FAIL <criterion>` line per criterion, exits non-zero on any FAIL). The spike for task `1.N` lives in `1.N-<slug>`; tasks that share a topic still get their own directory and cross-link.
+- Environment: everything runs in Docker. Shared base image in `architecture/spikes/_common/` (pinned Debian digest, bwrap, iproute2, util-linux, iperf3, Go 1.27 via pinned toolchain image). Containers run `--security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined` (Docker's default profile blocks `unshare`, `mount` and `open_tree`, and masks `/proc`), never `--privileged`, so a pass shows the feature needs no more than unprivileged userns. Each `run.sh` states any extra flag (for example `--device /dev/net/tun`) and why.
+- Determinism: pinned image digests and Go module versions; no network except where a spike's question is the network (1.6, 1.7), and then only to a local fixture container, not the internet; fixed inputs, no sleeps for synchronisation (poll with a timeout). Benchmarks (1.6) record raw numbers as JSON, run N=5 and compare the median against a threshold declared in the README.
+- Honest verdicts: a criterion that cannot run on this host (for example `/dev/net/tun` is absent here) reports `SKIP <reason>`, never PASS; the README records the host kernel/WSL2 status and what is still unverified.
+- Index: `architecture/spikes/README.md` lists every spike with its verdict (GO / NO-GO / PARTIAL), date and the command to rerun; `make -C architecture/spikes all` (or `./run-all.sh`) reruns the lot.
+
+- [x] 1.0 Spike harness: `_common/Dockerfile`, `_common/lib.sh` (`pass`/`fail`/`skip` helpers and the exit-code rule), `architecture/spikes/README.md` index and `run-all.sh`; verify with a trivial self-test spike that PASS, FAIL and SKIP map to exit codes and that the image builds from a clean cache
+- [x] 1.1 `1.1-mount-propagation`: with `unshare -Urm` + `bwrap` in the container, a mount made in the broker ns under a shared `stage/` appears in the sandbox; criteria, run and result in its README
+- [x] 1.2 `1.2-mount-locked`: the sandbox cannot remount a propagated mount rw (`MNT_LOCKED`) and unmount propagates; reuses 1.1's fixture via `_common`
+- [x] 1.3 `1.3-bwrap-slave`: bwrap keeps `/workspaces` as a slave bind (or find the flag/wrapper); record the exact bwrap argv that works
+- [ ] 1.4 `1.4-ro-clone`: `open_tree` + `mount_setattr(RDONLY)` + `move_mount` yields a never-writable ro mount (tiny Go probe, a writer goroutine polls during attach to prove no rw window)
+- [ ] 1.5 `1.5-userns-nesting`: `--disable-userns` works under the broker's extra userns nesting; a nested `unshare -U` inside the sandbox must fail
+- [ ] 1.6 `1.6-netstack`: tap in a sandbox netns driven by gVisor netstack (TCP forward + DNS) vs `pasta`, with a local fixture server container instead of the internet; iperf3 throughput and latency, pass at >= 500 Mbit/s and added p50 < 1 ms; correctness matrix (streaming HTTP, a local npm registry and git server for `npm install`/`git clone`, DNS, closed-port refusal); `/dev/net/tun` availability (SKIP with reason if absent) and the gVisor build under Go 1.27 (pinned module version)
+- [ ] 1.7 `1.7-netns-listener`: a locked thread can `setns` into the sandbox netns, listen on loopback, and forward to host loopback; Go probe plus an assertion that the connection reaches the host-side fixture
+- [ ] 1.8 `1.8-pty-relay`: PTY relay with `SIGWINCH` redraw. Deterministic part: scripted fake TUIs (an inline one and an alt-screen one emitting `?1049h`) driven through the relay under a PTY in the container, asserting the final screen via a pty screen-scrape. Manual part: a checklist in the README for Claude Code and OpenCode, with results pasted in and marked as manual
+- [ ] 1.9 `1.9-mask-submount`: an empty ro bind layered over a propagated workspace mount shows empty in the sandbox, survives hot-add of a sibling, and unmounts cleanly with its parent
+- [ ] 1.10 Go/no-go for design Decisions 1 and 5 from the index verdicts; if either fails, update `design.md` to its fallback before continuing, and note any SKIPped criteria as accepted risk or follow-up
 
 ## 2. Project scaffold and preflight
 
@@ -51,7 +59,7 @@
 - [ ] 5.3 TCP forwarder with dial-before-handshake semantics; verify refused upstream yields connection-refused
 - [ ] 5.4 DNS answerer using the host resolver (UDP and TCP/53); verify name lookups; non-DNS UDP, ICMP and IPv6 dropped
 - [ ] 5.5 Dial-time destination policy blocking loopback, private, CGNAT, link-local, multicast, metadata, host addresses; verify tests including names resolving to private addresses
-- [ ] 5.6 Milestone: agent started via `isolait start` reaches its API and completes a task end to end; verify manually and record in `docs/spikes/e2e.md`
+- [ ] 5.6 Milestone: agent started via `isolait start` reaches its API and completes a task end to end; verify manually and record in `architecture/spikes/e2e.md`
 - [ ] 5.7 Document egress behavior and limitations (TCP only, IPv4 only, no ICMP) in `README.md`; verify examples
 
 ## 6. Hot mounts
