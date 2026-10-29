@@ -6,7 +6,7 @@ FROM ${GO} AS go
 
 FROM ${DEBIAN}
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bubblewrap util-linux iproute2 iperf3 procps ca-certificates python3 \
+      bubblewrap util-linux iproute2 iperf3 procps ca-certificates python3 tmux git curl passt \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=go /usr/local/go /usr/local/go
 ENV PATH=/usr/local/go/bin:$PATH GOFLAGS=-mod=mod

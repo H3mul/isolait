@@ -8,5 +8,5 @@ spike_run() {
   docker run --rm \
     --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
     --security-opt systempaths=unconfined \
-    -v "$d:/spike/case:ro" "$@" isolait-spike bash /spike/case/test.sh
+    -v "$d:/spike/case:ro" -v "$d/../_common/lib.sh:/spike/lib.sh:ro" -v "$d/../_common/fixture.sh:/spike/fixture.sh:ro" "$@" isolait-spike bash /spike/case/test.sh
 }

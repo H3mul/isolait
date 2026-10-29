@@ -19,8 +19,18 @@ sandbox_start() {
   bwrap --unshare-user --unshare-pid --die-with-parent \
     --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
     --dev /dev --proc /proc --bind "$W/stage" /workspaces --bind "$W/out" /out \
-    --cap-add ALL bash -c "$1" &
+    --cap-add ALL $SBX_EXTRA bash -c "$1" 3>"$W/info" &   # SBX_EXTRA: extra bwrap flags (word-split on purpose); fd 3 collects --info-fd JSON
   SBX=$!
+}
+# sandbox_child_pid: pid of the sandbox's PID 1 as seen from the broker (needs --info-fd 3 in SBX_EXTRA)
+sandbox_child_pid() {
+  local t=50 p
+  while [ $t -gt 0 ]; do
+    p=$(sed -n 's/.*"child-pid": *\([0-9]*\).*/\1/p' "$W/info" 2>/dev/null)
+    [ -n "$p" ] && { echo "$p"; return 0; }
+    t=$((t-1)); sleep 0.1
+  done
+  return 1
 }
 sandbox_wait() { wait "$SBX"; }
 wait_file() { local t=$(( ${2:-5} * 10 )); while [ $t -gt 0 ]; do [ -e "$1" ] && return 0; t=$((t-1)); sleep 0.1; done; return 1; }
