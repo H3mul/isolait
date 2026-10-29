@@ -4,7 +4,7 @@
 spike_run() {
   d=$(cd "$(dirname "$0")" && pwd)
   docker image inspect isolait-spike >/dev/null 2>&1 || {
-    echo "image isolait-spike missing: run architecture/spikes/_common/build.sh first" >&2; exit 2; }
+    echo "image isolait-spike missing: run openspec/changes/phase1-sandbox-core/spikes/_common/build.sh first" >&2; exit 2; }
   docker run --rm \
     --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
     --security-opt systempaths=unconfined \
