@@ -40,6 +40,13 @@ The system SHALL remove a mount from `/workspaces` in a running session on reque
 - **WHEN** the user unmounts a busy directory with `--force`
 - **THEN** the mount is detached from the sandbox view and processes holding it lose access to new lookups
 
+### Requirement: Grant visibility
+The system SHALL print the target session id when a mount is added or removed, and SHALL show current mounts and their modes in `isolait status`.
+
+#### Scenario: Echoed target
+- **WHEN** the user runs `isolait mount ~/shared` while two sessions exist
+- **THEN** the output names the session that received the mount
+
 ### Requirement: Mount naming
 The system SHALL place each mount at `/workspaces/<name>` where `<name>` defaults to the source directory's basename, MAY be overridden with `--as`, and SHALL reject names that are empty, contain `/`, or equal `.` or `..`.
 
@@ -63,7 +70,7 @@ The system SHALL validate the source as a directory by the identity of the opene
 - **THEN** the add fails with a not-a-directory error
 
 ### Requirement: Protected-path deny list
-The system SHALL refuse to mount `/`, the user's home directory, any ancestor of a protected path, and protected paths themselves, including credential directories (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`), `/proc`, `/sys`, `/dev`, `/run`, and `isolait`'s own state directory.
+The system SHALL refuse to mount `/`, the user's home directory, any ancestor of a protected path, and protected paths themselves, including credential directories (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`), `/proc`, `/sys`, `/dev`, `/run`, isolait's state and global config directories, and any `.isolait` directory.
 
 #### Scenario: Mounting home
 - **WHEN** the user asks to mount `$HOME`
@@ -72,6 +79,13 @@ The system SHALL refuse to mount `/`, the user's home directory, any ancestor of
 #### Scenario: Mounting a protected path
 - **WHEN** the user asks to mount `~/.ssh`
 - **THEN** the add is refused
+
+### Requirement: Isolait directory masked in mounts
+The system SHALL mask a `.isolait` directory at the root of every mounted directory, so that it appears absent or empty inside the sandbox and the sandbox cannot read or change it.
+
+#### Scenario: Added directory contains .isolait
+- **WHEN** a directory containing `.isolait` is added with `isolait mount`
+- **THEN** `.isolait` is absent or empty at `/workspaces/<name>/.isolait`
 
 ### Requirement: Non-recursive mounts
 The system SHALL expose only the requested directory's own filesystem, and SHALL NOT expose other filesystems mounted beneath it on the host.

@@ -1,35 +1,56 @@
 schema: spec-driven
 
 context: |
-  isolait: Go CLI + daemon that runs AI coding agents (Claude Code, OpenCode, ...)
-  in a dynamic, zero-trust sandbox on Linux and Windows (WSL2). Binary and CLI
-  are named `isolait` (formerly `agent-box`; never use the old name).
+  isolait: Go CLI + per-session daemon that runs AI coding agents (Claude Code,
+  OpenCode, ...) in a dynamic, zero-trust sandbox on Linux and Windows (WSL2).
+  Binary and CLI are named `isolait` (formerly `agent-box`; never use the old name).
 
   Threat model: malicious dependency hooks, indirect prompt injection (reading
   ~/.ssh, creds, env), data exfiltration over the network, abuse of local
-  infrastructure (docker.sock, localhost services). Security decisions default
-  to deny; every permission is an explicit, user-granted, revocable grant.
+  infrastructure (docker.sock, localhost services), hostile repositories
+  (including a shipped `.isolait` config). Security decisions default to deny;
+  every permission is an explicit, user-granted, revocable grant.
 
-  Fixed stack: Go (single static binary), bubblewrap (bwrap) for rootless
-  namespaces, nsenter for hot-plugging into running sandboxes, cobra (CLI),
-  gVisor netstack + miekg/dns (user-space network tier). No hypervisor/VM.
+  Fixed stack: Go (single static binary; the daemon, `netd` network engine and
+  in-sandbox init shim are subcommands of one binary), bubblewrap (bwrap >= 0.8)
+  for rootless namespaces, gVisor netstack for the user-space network engine,
+  cobra (CLI). No hypervisor/VM. No tmux, pasta or nft dependency.
 
   Constraints:
-  - Rootless: unprivileged user namespaces, CAP_SYS_ADMIN dropped; host system
-    paths (/usr, /lib, /bin) read-only; only designated workdirs read-write;
-    /tmp and hot-plug slots are tmpfs.
-  - Hot-plug (dirs, unix sockets, /dev nodes, ports) must not restart the
-    session or lose agent context.
-  - Two network tiers: Tier A kernel netns + iptables/nftables (default, raw
-    IP/CIDR/port rules); Tier B TUN + gVisor netstack (domain/SNI/DNS rules).
-    Adding a domain rule auto-elevates A -> B.
+  - Rootless: unprivileged user namespaces, no capabilities in the sandbox,
+    nested user namespaces blocked unless `--allow-userns`; host system paths
+    read-only; /tmp is tmpfs.
+  - Hot-mounting is done by a broker that owns a parent user+mount namespace;
+    the sandbox is a propagation slave. Nothing privileged ever runs inside the
+    sandbox, and `nsenter`-into-sandbox is not used. Mount and network
+    operations originate outside the sandbox.
+  - Hot-plug (dirs, ports; later sockets and devices) must not restart the
+    session or lose agent context. Sessions live as long as their init process.
+  - Networking is a single user-space engine (netstack in `netd`), not tiered.
+    Phase 1: internet-only outbound TCP and DNS, IPv4 only, private/link-local/
+    metadata ranges blocked at dial time, localhost TCP port grants as listeners
+    on the sandbox loopback. Non-DNS UDP and ICMP are dropped.
+  - Sessions are tmux-style: `start` forks a daemon and attaches; ids are
+    `<workdir-basename>-<short-hex>`; commands target the last attached session
+    unless `--sid`. No scrollback in Phase 1.
+  - Config is tiered: global `~/.config/isolait` and workspace-local `.isolait`
+    (config + state). Both are strictly excluded from the sandbox; a workspace
+    config is ignored entirely until `isolait trust`.
+  - Environment is an explicit allowlist (`--env`); `--inherit-env` is opt-in.
   - Must behave identically on native Linux and WSL2 (warn on /mnt/c paths;
-    usbipd-win helpers for USB).
-  - CLI surface: start, status, allow {port,socket,usb,domain}, mount [--ro].
+    usbipd-win helpers for USB in Phase 2+).
+  - CLI surface: start, attach, list, status, stop, exec, trust,
+    mount [--ro] [--as], unmount [--force], allow/deny port.
 
-  Roadmap phases: 1 baseline bwrap engine + CLI; 2 nsenter hot-plugging;
-  3 hybrid networking; 4 WSL2 polish, logging, session recovery, packaging.
-  Scope each change to one phase.
+  Roadmap phases (scope each change to one phase):
+  1 sandbox core: daemon, sessions, hot-mounts (rw|ro), netstack egress, TCP
+    port grants, tiered config (change `phase1-sandbox-core`);
+  2 `git-rw` default mount mode, domain/SNI filtering and `allow lan`,
+    optional idle timeout, USB devices, unix sockets (change
+    `phase2-git-rw-and-devices`);
+  3 later: UDP, scrollback/log replay, further network features;
+  4 WSL2 polish, logging, session recovery, packaging.
+  Phase 3/4 boundaries are provisional.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

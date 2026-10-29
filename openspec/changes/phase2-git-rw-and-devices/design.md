@@ -32,6 +32,9 @@ Positioning: a **review-surface policy, not an isolation boundary**. Documentati
 
 ### Enforcement: Tier 1 static snapshot
 
+Phase 1 already layers a ro mask over `.isolait` on workspace mounts (see `phase1-sandbox-core` design, configuration tiers). `git-rw` reuses that sub-mount mechanism for `.git`, control files and ignored paths. The layered-ro propagation spike is therefore done in Phase 1 (task 1.9).
+
+
 At session start and each mount add, run `git ls-files -o -i --exclude-standard --directory` and `git rev-parse`. Mount the workspace rw, then layer ro bind mounts over `.git`, the control files, and each pre-existing ignored file/dir, using the Phase 1 mount primitive.
 
 - Strong for paths that exist at snapshot time. Weak for paths created later (nested `.git` from `git clone`, new ignored dirs); small race window.
@@ -65,6 +68,6 @@ If layered ro binds over a propagated rw clone prove unreliable, or ignored-dir 
 
 ## Open Questions
 
-- Tier B / device / socket designs: not started. `docker.sock` needs a confirmation UX.
+- Device / socket / SNI-filtering designs: not started. `docker.sock` needs a confirmation UX.
 - Does the layered-ro approach interact badly with mount propagation on unmount of the parent workspace (spike needed).
 - Exact default error text and `--rw` hint when an install fails on a ro ignored dir.
