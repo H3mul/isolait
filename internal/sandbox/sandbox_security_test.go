@@ -30,6 +30,7 @@ type job struct {
 	InheritEnv  bool
 	AllowUserns bool
 	Workspace   *workspace
+	Bin         *BinOptions
 }
 
 type workspace struct {
@@ -68,6 +69,15 @@ func helper() {
 	syscall.Mount("", j.Spec.Stage, "", syscall.MS_SHARED, "")
 	j.Spec.AllowUserns = j.AllowUserns
 	base := map[string]string{"HOME": j.Spec.HostHome, "PATH": "/usr/bin:/bin"}
+	var bins Binaries
+	if j.Bin != nil {
+		var err error
+		if bins, err = ResolveBinaries(*j.Bin); err != nil {
+			fail(err)
+			return
+		}
+		base["PATH"] = bins.Path()
+	}
 	env, err := BuildEnv(j.HostEnv, j.EnvNames, j.InheritEnv, base)
 	if err != nil {
 		fail(err)
@@ -78,6 +88,12 @@ func helper() {
 	if err != nil {
 		fail(err)
 		return
+	}
+	if j.Bin != nil {
+		if err := AddBinaries(p, bins); err != nil {
+			fail(err)
+			return
+		}
 	}
 	if w := j.Workspace; w != nil {
 		empty := filepath.Join(filepath.Dir(j.Spec.Stage), "empty")
@@ -308,5 +324,48 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// 3.5 end to end: an agent behind a symlink runs by name from its resolved install root; host PATH
+// directories that were not requested are invisible; --inherit-path exposes only the filtered ones.
+func TestBinaryExposure(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	real := filepath.Join(root, "home/.local/share/agent/versions/1")
+	must(t, os.MkdirAll(filepath.Dir(real), 0o755))
+	must(t, os.WriteFile(real, []byte("#!/bin/sh\necho agent-ran $0\n"), 0o755))
+	launcher := filepath.Join(root, "home/.local/bin")
+	must(t, os.MkdirAll(launcher, 0o755))
+	must(t, os.Symlink(real, filepath.Join(launcher, "agent")))
+	other := filepath.Join(root, "home/otherbin")
+	must(t, os.MkdirAll(other, 0o755))
+	must(t, os.WriteFile(filepath.Join(other, "othertool"), []byte("#!/bin/sh\necho other-ran\n"), 0o755))
+	hostPath := launcher + ":" + other + ":/usr/bin"
+
+	script := `
+echo agent=$(agent 2>&1)
+echo agentpath=$(command -v agent)
+echo launcher=$([ -e ` + launcher + ` ] && echo visible || echo absent)
+echo other=$(othertool 2>&1 | head -c 40)
+echo otherdir=$([ -e ` + other + ` ] && echo visible || echo absent)
+`
+	j := baseJob()
+	j.Script = script
+	j.Bin = &BinOptions{Agent: "agent", HostPath: hostPath, Home: filepath.Join(root, "home"), InheritPrefixes: []string{filepath.Join(root, "home")}}
+	kv := runJob(t, j)
+	if !strings.HasPrefix(kv["agent"], "agent-ran") || kv["agentpath"] != "/isolait/bin/agent" {
+		t.Errorf("agent behind a symlink does not run by name: agent=%q path=%q", kv["agent"], kv["agentpath"])
+	}
+	if kv["launcher"] != "absent" {
+		t.Error("the host launcher bin directory is visible")
+	}
+	if kv["otherdir"] != "absent" || strings.Contains(kv["other"], "other-ran") {
+		t.Errorf("an unrequested host PATH directory is visible: dir=%q run=%q", kv["otherdir"], kv["other"])
+	}
+
+	j.Bin.InheritPath = true
+	kv = runJob(t, j)
+	if !strings.Contains(kv["other"], "other-ran") {
+		t.Errorf("--inherit-path did not expose the allowed directory: %q", kv["other"])
 	}
 }
