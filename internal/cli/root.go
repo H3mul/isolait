@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime/debug"
 
+	"github.com/H3mul/isolait/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -46,7 +47,7 @@ func Root() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}
-	root.AddCommand(versionCmd(), preflightCmd())
+	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(config.DefaultPaths))
 	return root
 }
 
