@@ -5,15 +5,19 @@ package sandbox
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/H3mul/isolait/internal/broker"
+	"github.com/H3mul/isolait/internal/initshim"
 	"github.com/H3mul/isolait/internal/mounts"
+	"github.com/H3mul/isolait/internal/plan"
 )
 
 // Real-kernel tests for the baseline (spikes 1.3 and 1.5, now against the product code). Each test re-executes
@@ -31,6 +35,7 @@ type job struct {
 	AllowUserns bool
 	Workspace   *workspace
 	Bin         *BinOptions
+	InitScripts []string // run the init shim as PID 1 and spawn each script in turn
 }
 
 type workspace struct {
@@ -38,13 +43,30 @@ type workspace struct {
 	RO        bool
 }
 
+type spawnResult struct {
+	Out  string
+	Code int
+	Sig  int
+}
+
 type result struct {
-	Stdout string
-	Stderr string
-	Err    string
+	Stdout   string
+	Stderr   string
+	Err      string
+	HelloPID int
+	Spawns   []spawnResult
+
+	AgentHome string // set by the test runner, not the helper
 }
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "__isolait_init__" { // this binary, bound at /isolait/init, as the shim
+		if err := initshim.Run(os.NewFile(initshim.ControlFD, "control")); err != nil {
+			os.Stderr.WriteString("init: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		return
+	}
 	if os.Getenv(helperEnv) != "" {
 		helper()
 		return
@@ -68,6 +90,10 @@ func helper() {
 	}
 	syscall.Mount("", j.Spec.Stage, "", syscall.MS_SHARED, "")
 	j.Spec.AllowUserns = j.AllowUserns
+	if len(j.InitScripts) > 0 {
+		exe, _ := os.Executable()
+		j.Spec.InitExe, _ = filepath.EvalSymlinks(exe)
+	}
 	base := map[string]string{"HOME": j.Spec.HostHome, "PATH": "/usr/bin:/bin"}
 	var bins Binaries
 	if j.Bin != nil {
@@ -110,8 +136,12 @@ func helper() {
 		}
 		j.Spec.Chdir = dst
 	}
+	if len(j.InitScripts) > 0 {
+		runInit(&j, p, &res)
+		return
+	}
 	var out, errb bytes.Buffer
-	sb, err := Start(j.Spec, p, []string{"/bin/sh", "-c", j.Script}, nil, &out, &errb)
+	sb, err := Start(j.Spec, p, []string{"/bin/sh", "-c", j.Script}, nil, nil, &out, &errb)
 	if err != nil {
 		fail(err)
 		res.Stderr = errb.String()
@@ -124,6 +154,19 @@ func helper() {
 }
 
 func runJob(t *testing.T, j job) map[string]string {
+	t.Helper()
+	r := runRaw(t, j)
+	kv := map[string]string{}
+	for _, l := range strings.Split(r.Stdout, "\n") {
+		if k, v, ok := strings.Cut(l, "="); ok {
+			kv[k] = v
+		}
+	}
+	kv["_agenthome"] = r.AgentHome
+	return kv
+}
+
+func runRaw(t *testing.T, j job) result {
 	t.Helper()
 	root := t.TempDir()
 	j.Spec.Stage = filepath.Join(root, "stage")
@@ -158,15 +201,8 @@ func runJob(t *testing.T, j job) map[string]string {
 	if r.Err != "" {
 		t.Fatalf("sandbox failed: %s\nstderr: %s", r.Err, r.Stderr)
 	}
-	kv := map[string]string{}
-	for _, l := range strings.Split(r.Stdout, "\n") {
-		if k, v, ok := strings.Cut(l, "="); ok {
-			kv[k] = v
-		}
-	}
-	// keep the agent home visible to the caller for persistence assertions
-	kv["_agenthome"] = j.Spec.AgentHome
-	return kv
+	r.AgentHome = j.Spec.AgentHome // for persistence assertions
+	return r
 }
 
 const probe = `
@@ -367,5 +403,92 @@ echo otherdir=$([ -e ` + other + ` ] && echo visible || echo absent)
 	kv = runJob(t, j)
 	if !strings.Contains(kv["other"], "other-ran") {
 		t.Errorf("--inherit-path did not expose the allowed directory: %q", kv["other"])
+	}
+}
+
+// runInit starts the sandbox with the init shim as PID 1 and runs each script through it, one after the other.
+func runInit(j *job, p *plan.Plan, res *result) {
+	d, sb2, err := initshim.Socketpair()
+	if err != nil {
+		res.Err = err.Error()
+		return
+	}
+	sb, err := Start(j.Spec, p, []string{InitPath, "__isolait_init__"}, []*os.File{sb2}, nil, nil, os.Stderr)
+	sb2.Close()
+	if err != nil {
+		res.Err = err.Error()
+		return
+	}
+	cl, err := initshim.NewClient(d)
+	if err != nil {
+		res.Err = err.Error()
+		return
+	}
+	if res.HelloPID, err = cl.WaitHello(10 * time.Second); err != nil {
+		res.Err = err.Error()
+		return
+	}
+	env := []string{"PATH=/usr/bin:/bin", "HOME=" + j.Spec.HostHome}
+	for _, script := range j.InitScripts {
+		in, _ := os.Open(os.DevNull)
+		r, w, _ := os.Pipe()
+		id, _, err := cl.Spawn([]string{"/bin/sh", "-c", script}, env, j.Spec.Chdir, false, [3]*os.File{in, w, w})
+		in.Close()
+		w.Close()
+		if err != nil {
+			res.Err = err.Error()
+			return
+		}
+		var e initshim.Event
+		select {
+		case e = <-cl.Exits():
+		case <-time.After(10 * time.Second):
+			res.Err = "timed out waiting for the process to be reported as exited"
+			return
+		}
+		if e.ID != id {
+			res.Err = "exit for the wrong process"
+			return
+		}
+		b, _ := io.ReadAll(r)
+		r.Close()
+		res.Spawns = append(res.Spawns, spawnResult{Out: string(b), Code: e.Code, Sig: e.Signal})
+	}
+	cl.Shutdown()
+	sb.Wait()
+}
+
+// 3.6: the init shim is PID 1; the agent can exit and be started again in the same sandbox with mounts and
+// /tmp intact; orphans are reaped.
+func TestInitShimLifecycle(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "proj")
+	must(t, os.MkdirAll(src, 0o755))
+	must(t, os.WriteFile(filepath.Join(src, "f"), []byte("data"), 0o644))
+
+	j := baseJob()
+	j.Workspace = &workspace{Src: src, Name: "proj"}
+	j.InitScripts = []string{
+		`echo first > /tmp/marker; echo pid=$$; exit 3`,
+		`echo marker=$(cat /tmp/marker); echo ws=$(ls /workspaces); echo f=$(cat /workspaces/proj/f); (sleep 0.3 &); exit 0`,
+		`sleep 0.8; z=0; for p in /proc/[0-9]*; do grep -q '^State:.*Z' $p/status 2>/dev/null && z=$((z+1)); done; echo zombies=$z; echo pid1=$(cat /proc/1/comm)`,
+	}
+	r := runRaw(t, j)
+	if r.HelloPID != 1 {
+		t.Errorf("the shim is PID %d inside the sandbox, want 1", r.HelloPID)
+	}
+	if len(r.Spawns) != 3 {
+		t.Fatalf("spawns: %+v", r.Spawns)
+	}
+	if r.Spawns[0].Code != 3 {
+		t.Errorf("first process exit %+v, want code 3 reported", r.Spawns[0])
+	}
+	second := r.Spawns[1].Out
+	for _, want := range []string{"marker=first", "ws=proj", "f=data"} {
+		if !strings.Contains(second, want) {
+			t.Errorf("after the first process exited the sandbox lost state: want %q in %q", want, second)
+		}
+	}
+	if !strings.Contains(r.Spawns[2].Out, "zombies=0") {
+		t.Errorf("orphans were not reaped: %q", r.Spawns[2].Out)
 	}
 }

@@ -31,11 +31,19 @@ type Spec struct {
 	AllowUserns bool     // opt in to nested user namespaces
 	Env         []string // complete sandbox environment as K=V (see BuildEnv)
 	Chdir       string   // initial working directory inside the sandbox
+	InitExe     string   // host path of the isolait binary, bound read-only at /isolait/init as the init shim
 	UID, GID    int
 }
 
 // Workspaces is where the broker mounts workspaces inside the sandbox.
 const Workspaces = "/workspaces"
+
+// InitPath is where the isolait binary appears inside the sandbox to run as PID 1; AgentLinkDir holds the
+// symlink that lets the agent be started by name.
+const (
+	InitPath     = "/isolait/init"
+	AgentLinkDir = "/isolait/bin"
+)
 
 // BuildPlan returns the baseline filesystem plan: read-only system dirs, minimal /etc, /dev, /proc,
 // memory-backed /tmp, the persistent per-agent home and the /workspaces stage.
@@ -85,8 +93,15 @@ func BuildPlan(s Spec) (*plan.Plan, error) {
 		{Kind: plan.Tmpfs, Dst: "/tmp"},
 		{Kind: plan.Bind, Src: s.AgentHome, Dst: s.HostHome},
 		{Kind: plan.Bind, Src: s.Stage, Dst: Workspaces},
+		{Kind: plan.Dir, Dst: "/isolait"},
+		{Kind: plan.Dir, Dst: AgentLinkDir},
 	} {
 		if err := add(e); err != nil {
+			return nil, err
+		}
+	}
+	if s.InitExe != "" {
+		if err := add(plan.Entry{Kind: plan.RoBind, Src: s.InitExe, Dst: InitPath}); err != nil {
 			return nil, err
 		}
 	}

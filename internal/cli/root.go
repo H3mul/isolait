@@ -47,7 +47,7 @@ func Root() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}
-	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(config.DefaultPaths))
+	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(config.DefaultPaths), initCmd())
 	return root
 }
 

@@ -14,10 +14,6 @@ import (
 // live under the read-only system dirs, so they are mounted by construction.
 var systemPath = []string{"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"}
 
-// agentLinkDir holds a symlink to the agent so it can be started by name even when its real location is
-// not on any sandbox PATH directory.
-const agentLinkDir = "/isolait/bin"
-
 // BinOptions describe what to expose besides the system directories.
 type BinOptions struct {
 	Agent       string   // command or path the user asked to run, resolved with HostPath
@@ -70,11 +66,8 @@ func ResolveBinaries(o BinOptions) (Binaries, error) {
 		root := installRoot(resolved)
 		b.bind(m, root)
 		name := filepath.Base(agent)
-		b.Entries = append(b.Entries,
-			plan.Entry{Kind: plan.Dir, Dst: "/isolait"},
-			plan.Entry{Kind: plan.Dir, Dst: agentLinkDir},
-			plan.Entry{Kind: plan.Symlink, Src: resolved, Dst: agentLinkDir + "/" + name})
-		b.PathDirs = append([]string{agentLinkDir}, b.PathDirs...)
+		b.Entries = append(b.Entries, plan.Entry{Kind: plan.Symlink, Src: resolved, Dst: AgentLinkDir + "/" + name})
+		b.PathDirs = append([]string{AgentLinkDir}, b.PathDirs...)
 	}
 
 	// explicit tools

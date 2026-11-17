@@ -19,8 +19,9 @@ type Sandbox struct {
 }
 
 // Start launches bwrap with the baseline for s, running argv as PID 1 of the sandbox. It must run in the
-// broker's mount namespace. stdin/stdout/stderr may be nil (discarded).
-func Start(s Spec, p *plan.Plan, argv []string, stdin io.Reader, stdout, stderr io.Writer) (*Sandbox, error) {
+// broker's mount namespace. extra files become fds 4, 5, ... in the sandbox (fd 3 is bwrap's info pipe);
+// stdin/stdout/stderr may be nil (discarded).
+func Start(s Spec, p *plan.Plan, argv []string, extra []*os.File, stdin io.Reader, stdout, stderr io.Writer) (*Sandbox, error) {
 	if len(argv) == 0 {
 		return nil, errors.New("sandbox: empty command")
 	}
@@ -40,7 +41,7 @@ func Start(s Spec, p *plan.Plan, argv []string, stdin io.Reader, stdout, stderr 
 	cmd := exec.Command(bwrap, args...)
 	cmd.Env = []string{} // bwrap's own environment is irrelevant; the sandbox gets --clearenv plus --setenv
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
-	cmd.ExtraFiles = []*os.File{w} // becomes fd 3
+	cmd.ExtraFiles = append([]*os.File{w}, extra...) // w becomes fd 3, extra fd 4 onward
 	if err := cmd.Start(); err != nil {
 		w.Close()
 		return nil, err
