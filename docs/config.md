@@ -22,6 +22,10 @@ is read: never sub-directories, never directories added later with `isolait moun
 | `inherit_path` | bool | `false` | Add filtered host `PATH` entries to the sandbox `PATH` |
 | `allow_userns` | bool | `false` | Allow nested user namespaces inside the sandbox (weakens isolation) |
 | `max_port_range` | int | `1024` | Largest port range one `allow port` may open (1 to 65535) |
+| `limits.pids` | int | `4096` | Most processes and threads in the whole session (16 to 4194304) |
+| `limits.memory` | string | unset | Memory cap for the whole session: a size such as `"8G"` or a percentage such as `"50%"` |
+| `limits.cpu` | string | unset | CPU quota for the whole session, e.g. `"200%"` (two cores) |
+| `limits.required` | bool | `false` | Fail `start` instead of warning when limits cannot be applied |
 
 Example with every key:
 
@@ -33,7 +37,21 @@ inherit_env = false
 inherit_path = false
 allow_userns = false
 max_port_range = 1024
+
+[limits]
+pids = 4096
+memory = "8G"
+cpu = "200%"
+required = false
 ```
+
+## Resource limits
+
+Each session runs in its own systemd user scope, so a fork bomb or runaway memory use in the sandbox is
+bounded: `limits.pids` always applies by default; memory and CPU are only capped when you set them (a default
+cap would kill legitimate builds). Limits are best effort: on a host without a systemd user manager (for
+example WSL2 without `systemd=true`) the session still starts, with a warning, and `isolait status` shows
+`limits: unavailable (<reason>)`. Set `limits.required = true` to refuse to start instead.
 
 ## Trust
 

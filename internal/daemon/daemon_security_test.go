@@ -26,6 +26,14 @@ func TestMain(m *testing.M) {
 				os.Exit(1)
 			}
 			return
+		case "_spawn":
+			exe, _ := os.Executable()
+			exe, _ = filepath.EvalSymlinks(exe)
+			if err := SpawnFromStdin(exe); err != nil {
+				os.Stderr.WriteString("_spawn: " + err.Error() + "\n")
+				os.Exit(1)
+			}
+			return
 		case "__isolait_init__":
 			if err := initshim.Run(os.NewFile(initshim.ControlFD, "control")); err != nil {
 				os.Exit(1)
@@ -237,5 +245,74 @@ func TestTwoSessionsAreIndependent(t *testing.T) {
 	}
 	if err := Stop(e.base, b.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func userManagerRunning(t *testing.T) string {
+	t.Helper()
+	sd, err := exec.LookPath("systemd-run")
+	if err != nil {
+		t.Skip("no systemd-run on this host")
+	}
+	out, _ := exec.Command("systemctl", "--user", "is-system-running").Output()
+	if st := strings.TrimSpace(string(out)); st != "running" && st != "degraded" {
+		t.Skipf("no systemd user manager (%q)", st)
+	}
+	return sd
+}
+
+// 3.13: the daemon, and so everything in the session, lives in a scope that carries the limits.
+func TestLimitsAppliedThroughScope(t *testing.T) {
+	sd := userManagerRunning(t)
+	e := newEnv(t)
+	spec := e.spec(t, "sh")
+	spec.SystemdRun = sd
+	spec.Limits = Limits{Pids: 200, Memory: "512M", CPU: "150%"}
+	if err := Launch(spec, os.Args[0]); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Query(e.base, spec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Limits.Available || st.Limits.PidsMax != 200 || st.Limits.MemoryMax != 512<<20 || st.Limits.PidsCurrent < 1 {
+		t.Errorf("limits not applied: %+v", st.Limits)
+	}
+	pid := daemonPID(t, e, spec.ID)
+	cg, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cgroup")
+	scope := "isolait-" + spec.ID + ".scope"
+	if !strings.Contains(string(cg), scope) {
+		t.Fatalf("the daemon is not in its session scope %s: %s", scope, cg)
+	}
+	dir := "/sys/fs/cgroup" + strings.TrimPrefix(strings.TrimSpace(string(cg)), "0::")
+	if b, _ := os.ReadFile(dir + "/cpu.max"); !strings.HasPrefix(string(b), "150000 ") {
+		t.Errorf("cpu quota not applied: %q", b)
+	}
+	if err := Stop(e.base, spec.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitGone(t, "the session scope", func() bool { _, err := os.Stat(dir); return err == nil })
+}
+
+// Without a systemd user manager, or when the scope cannot be created, the session still starts and says so.
+func TestLimitsUnavailableIsVisibleAndNotFatal(t *testing.T) {
+	for name, sd := range map[string]string{"no systemd-run": "", "scope fails": "/bin/false"} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			spec := e.spec(t, "sh")
+			spec.SystemdRun = sd
+			spec.Limits = Limits{Pids: 4096}
+			if err := Launch(spec, os.Args[0]); err != nil {
+				t.Fatalf("a session must start without limits unless they are required: %v", err)
+			}
+			defer Stop(e.base, spec.ID)
+			st, err := Query(e.base, spec.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.Limits.Available || !strings.Contains(st.Limits.Reason, "unavailable") {
+				t.Errorf("status must say limits are unavailable and why: %+v", st.Limits)
+			}
+		})
 	}
 }

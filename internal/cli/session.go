@@ -26,7 +26,7 @@ type deps struct {
 func realDeps() deps { return deps{paths: config.DefaultPaths, runtime: session.RuntimeBase} }
 
 func sessionCmds(d deps) []*cobra.Command {
-	return []*cobra.Command{startCmd(d), listCmd(d), statusCmd(d), stopCmd(d), daemonCmd()}
+	return []*cobra.Command{startCmd(d), listCmd(d), statusCmd(d), stopCmd(d), daemonCmd(), spawnCmd()}
 }
 
 // target resolves the session a command acts on: a positional id, else --sid, else the last attached.
@@ -46,6 +46,20 @@ func daemonCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "daemon", Short: "Run a session daemon (internal)", Hidden: true, Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error { return daemon.RunFromFD() },
+	}
+}
+
+// spawnCmd runs inside the session's systemd scope (see daemon.SpawnFromStdin).
+func spawnCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "_spawn", Short: "Start a session daemon inside its resource scope (internal)", Hidden: true, Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			exe, err := selfExe()
+			if err != nil {
+				return err
+			}
+			return daemon.SpawnFromStdin(exe)
+		},
 	}
 }
 
@@ -90,6 +104,7 @@ func statusCmd(d deps) *cobra.Command {
 				fmt.Fprintf(w, "  %-28s %s  (%s)\n", m.Path, m.Mode, m.Src)
 			}
 			fmt.Fprintf(w, "tool roots  %s\nports       %s\nenv         %s\n", orNone(st.Roots), orNone(intsToStrings(st.Ports)), orNone(st.EnvNames))
+			fmt.Fprintf(w, "limits      %s\n", limitsLine(st.Limits))
 			for _, warn := range st.Warnings {
 				fmt.Fprintf(w, "warning  %s\n", warn)
 			}
@@ -183,6 +198,10 @@ func startCmd(d deps) *cobra.Command {
 				Agent: args, HostEnv: os.Environ(), EnvNames: res.Config.Env, InheritEnv: res.Config.InheritEnv,
 				InheritPath: res.Config.InheritPath, Tools: res.Config.Tools, AllowUserns: res.Config.AllowUserns,
 				HostHome: home, HostPath: os.Getenv("PATH"), User: u.Username, UID: os.Getuid(), GID: os.Getgid(), InitExe: exe, Bwrap: bwrap,
+				Limits: daemon.Limits{Pids: res.Config.Limits.Pids, Memory: res.Config.Limits.Memory, CPU: res.Config.Limits.CPU, Required: res.Config.Limits.Required},
+			}
+			if sd, err := exec.LookPath("systemd-run"); err == nil {
+				spec.SystemdRun = sd
 			}
 			if err := daemon.Launch(spec, exe); err != nil {
 				session.Remove(base, id)
@@ -256,4 +275,34 @@ func intsToStrings(n []int) []string {
 		s = append(s, fmt.Sprint(v))
 	}
 	return s
+}
+
+func limitsLine(l daemon.LimitsStatus) string {
+	if !l.Available {
+		return "unavailable (" + strings.TrimPrefix(l.Reason, "unavailable: ") + ")"
+	}
+	max := func(n int64) string {
+		if n == 0 {
+			return "no limit"
+		}
+		return fmt.Sprint(n)
+	}
+	mem := fmt.Sprintf("%s used", humanBytes(l.MemoryCurrent))
+	if l.MemoryMax > 0 {
+		mem += " of " + humanBytes(l.MemoryMax)
+	}
+	return fmt.Sprintf("processes %d of %s, memory %s", l.PidsCurrent, max(l.PidsMax), mem)
+}
+
+func humanBytes(n uint64) string {
+	const k = 1024
+	switch {
+	case n >= k*k*k:
+		return fmt.Sprintf("%.1fG", float64(n)/(k*k*k))
+	case n >= k*k:
+		return fmt.Sprintf("%.0fM", float64(n)/(k*k))
+	case n >= k:
+		return fmt.Sprintf("%.0fK", float64(n)/k)
+	}
+	return fmt.Sprintf("%dB", n)
 }

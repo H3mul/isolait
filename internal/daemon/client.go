@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -24,53 +26,161 @@ import (
 const staleAfter = 30 * time.Second
 
 // Launch starts the daemon for spec in the broker's namespaces, detached from the caller's terminal, and
-// waits until its control socket answers. exe is the isolait binary to re-execute; it runs `daemon`.
+// waits until its control socket answers. exe is the isolait binary to re-execute. When systemd-run is
+// available the daemon starts inside a transient user scope carrying the session's limits; otherwise the
+// session starts without limits and says so (or fails when limits are required).
 func Launch(spec Spec, exe string) error {
 	dir := session.Dir(spec.RuntimeBase, spec.ID)
 	spec.Started = time.Now()
-	b, err := json.Marshal(spec)
-	if err != nil {
-		return err
-	}
 	logf, err := os.OpenFile(filepath.Join(dir, "daemon.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
 	defer logf.Close()
-	r, w, err := os.Pipe()
+
+	if spec.SystemdRun != "" && spec.Limits.Pids > 0 {
+		err := runScope(spec, exe, logf)
+		if err == nil {
+			return waitReady(spec, nil)
+		}
+		if spec.Limits.Required {
+			return fmt.Errorf("limits.required is set but resource limits cannot be applied: %w", err)
+		}
+		spec.LimitsNote = "unavailable: " + firstLine(err.Error())
+	} else {
+		reason := "no systemd user manager (systemd-run not found)"
+		if spec.Limits.Pids <= 0 {
+			reason = "disabled"
+		}
+		if spec.Limits.Required {
+			return fmt.Errorf("limits.required is set but resource limits cannot be applied: %s", reason)
+		}
+		spec.LimitsNote = "unavailable: " + reason
+	}
+	cmd, wrote, err := spawnDaemon(spec, exe, logf)
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	died := make(chan error, 1)
+	go func() { died <- cmd.Wait() }()
+	go func() { <-wrote }()
+	return waitReady(spec, died)
+}
 
+// runScope runs `exe _spawn` under systemd-run with the session's limits, handing it the spec on stdin.
+func runScope(spec Spec, exe string, logf *os.File) error {
+	dir := session.Dir(spec.RuntimeBase, spec.ID)
+	b, err := json.Marshal(spec)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(spec.SystemdRun, ScopeArgs("isolait-"+spec.ID, spec.Limits, exe)...)
+	cmd.Env = pick(os.Environ(), "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS") // enough to reach the user manager
+	cmd.Stdin = bytes.NewReader(b)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = io.MultiWriter(&out, logf), io.MultiWriter(&out, logf)
+	if err := cmd.Run(); err != nil {
+		if _, serr := os.Stat(filepath.Join(dir, "spawned")); serr == nil {
+			return nil // the daemon was started; only the exit status of the helper was unexpected
+		}
+		msg := strings.TrimSpace(out.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return errors.New(msg)
+	}
+	return nil
+}
+
+func pick(env []string, names ...string) []string {
+	var out []string
+	for _, kv := range env {
+		for _, n := range names {
+			if strings.HasPrefix(kv, n+"=") {
+				out = append(out, kv)
+			}
+		}
+	}
+	return out
+}
+
+func firstLine(s string) string { return strings.SplitN(strings.TrimSpace(s), "\n", 2)[0] }
+
+// spawnDaemon starts the daemon process and feeds it the spec through a pipe. The returned channel closes
+// once the spec has been written.
+func spawnDaemon(spec Spec, exe string, logf *os.File) (*exec.Cmd, <-chan struct{}, error) {
+	b, err := json.Marshal(spec)
+	if err != nil {
+		return nil, nil, err
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer r.Close()
 	cmd := broker.Command(exe, "daemon")
 	cmd.Env = []string{} // the daemon gets what it needs through the spec, never the caller's environment
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.ExtraFiles = []*os.File{r} // fd 3
 	if err := cmd.Start(); err != nil {
 		w.Close()
-		return fmt.Errorf("starting the session daemon: %w", err)
+		return nil, nil, fmt.Errorf("starting the session daemon: %w", err)
 	}
-	go func() { w.Write(b); w.Close() }() // may block briefly if the spec exceeds the pipe buffer
+	wrote := make(chan struct{})
+	go func() { w.Write(b); w.Close(); close(wrote) }() // blocks only if the spec exceeds the pipe buffer
+	return cmd, wrote, nil
+}
 
-	died := make(chan error, 1)
-	go func() { died <- cmd.Wait() }()
+// SpawnFromStdin is the body of the hidden `_spawn` command: it runs inside the session's systemd scope,
+// starts the daemon (which inherits the scope's cgroup and therefore its limits) and exits, leaving a marker
+// so the launcher can tell that the scope worked.
+func SpawnFromStdin(exe string) error {
+	var spec Spec
+	if err := json.NewDecoder(os.Stdin).Decode(&spec); err != nil {
+		return fmt.Errorf("reading session spec: %w", err)
+	}
+	dir := session.Dir(spec.RuntimeBase, spec.ID)
+	logf, err := os.OpenFile(filepath.Join(dir, "daemon.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logf.Close()
+	cmd, wrote, err := spawnDaemon(spec, exe, logf)
+	if err != nil {
+		return err
+	}
+	<-wrote
+	cmd.Process.Release()
+	return os.WriteFile(filepath.Join(dir, "spawned"), nil, 0o600)
+}
+
+// waitReady waits until the daemon's control socket answers, the daemon reports an error or dies, or time runs out.
+// died, when not nil, delivers the daemon's exit if it is our child.
+func waitReady(spec Spec, died <-chan error) error {
+	dir := session.Dir(spec.RuntimeBase, spec.ID)
 	sock := session.SocketPath(spec.RuntimeBase, spec.ID)
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
+		if _, err := ctl.Call(sock, ctl.Request{Op: "ping"}); err == nil {
+			return nil
+		}
 		select {
 		case err := <-died:
 			return startFailure(dir, err)
 		default:
 		}
-		if _, err := ctl.Call(sock, ctl.Request{Op: "ping"}); err == nil {
-			return nil
+		if b, err := os.ReadFile(filepath.Join(dir, "error")); err == nil && len(b) > 0 {
+			return startFailure(dir, errors.New("the session daemon failed"))
+		}
+		if stale(spec.RuntimeBase, spec.ID) && pidFileExists(dir) {
+			return startFailure(dir, errors.New("the session daemon exited"))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	cmd.Process.Kill()
 	return startFailure(dir, errors.New("timed out waiting for the session daemon"))
 }
+
+func pidFileExists(dir string) bool { _, err := os.Stat(filepath.Join(dir, "pid")); return err == nil }
 
 func startFailure(dir string, cause error) error {
 	if b, err := os.ReadFile(filepath.Join(dir, "error")); err == nil && len(b) > 0 {

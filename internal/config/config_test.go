@@ -23,6 +23,7 @@ func TestResolvePrecedenceAndLists(t *testing.T) {
 		Env:          []string{"A", "B"},
 		InheritPath:  true,
 		MaxPortRange: 300,
+		Limits:       Limits{Pids: 4096},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v want %+v", got, want)
@@ -214,5 +215,31 @@ func TestCorruptTrustStoreFailsLoudly(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(f.paths.StateDir, "trust.json"), []byte("{broken"), 0o600))
 	if _, err := f.load(t, Layer{}); err == nil || !strings.Contains(err.Error(), "corrupt") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestLimitsDefaultsMergeAndValidation(t *testing.T) {
+	if d := Defaults().Limits; d.Pids != 4096 || d.Memory != "" || d.CPU != "" || d.Required {
+		t.Fatalf("defaults %+v: memory and cpu must stay unset", d)
+	}
+	global := Layer{Limits: &LimitsLayer{Pids: ptr(1000), Memory: ptr("4G")}}
+	local := Layer{Limits: &LimitsLayer{Memory: ptr("50%"), Required: ptr(true)}}
+	got := Resolve(global, local).Limits
+	if got != (Limits{Pids: 1000, Memory: "50%", Required: true}) {
+		t.Fatalf("merged %+v", got)
+	}
+	for body, want := range map[string]string{
+		"[limits]\npids = 5\n":          `key "limits.pids"`,
+		"[limits]\nmemory = \"lots\"\n": `key "limits.memory"`,
+		"[limits]\nmemory = \"0\"\n":    `key "limits.memory"`,
+		"[limits]\ncpu = \"2\"\n":       `key "limits.cpu"`,
+		"[limits]\nbogus = 1\n":         "unknown key",
+	} {
+		if _, err := Parse("cfg", []byte(body)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: got %v, want %q", body, err, want)
+		}
+	}
+	if l, err := Parse("cfg", []byte("[limits]\npids = 100\nmemory = \"8G\"\ncpu = \"200%\"\nrequired = true\n")); err != nil || *l.Limits.Pids != 100 {
+		t.Fatalf("valid limits rejected: %v", err)
 	}
 }

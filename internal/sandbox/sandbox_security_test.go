@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,6 +38,10 @@ type job struct {
 	Bin         *BinOptions
 	InitScripts []string // run the init shim as PID 1 and spawn each script in turn
 	Tamper      string   // "extra-bind" or "no-ro": inject a bwrap misconfiguration the mount check must catch
+	ScopePids   int      // run the whole session in a systemd user scope with this TasksMax
+	// Saturating marks a script that exhausts the session cap on purpose: the shim may be starved of threads
+	// and never report the exit, so the output (closed when the script ends) is the result.
+	Saturating bool
 }
 
 type workspace struct {
@@ -61,6 +66,14 @@ type result struct {
 }
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "__scoped__" { // runs inside the systemd scope, outside any namespace
+		c := broker.Command(os.Args[0])
+		c.Env, c.Stdout, c.Stderr = os.Environ(), os.Stdout, os.Stderr
+		if err := c.Run(); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "__isolait_init__" { // this binary, bound at /isolait/init, as the shim
 		if err := initshim.Run(os.NewFile(initshim.ControlFD, "control")); err != nil {
 			os.Stderr.WriteString("init: " + err.Error() + "\n")
@@ -195,6 +208,13 @@ func runRawAllowErr(t *testing.T, j job) result {
 	}
 	b, _ := json.Marshal(j)
 	cmd := broker.Command(os.Args[0])
+	if j.ScopePids > 0 {
+		sd, err := exec.LookPath("systemd-run")
+		if err != nil {
+			t.Skip("no systemd-run on this host")
+		}
+		cmd = exec.Command(sd, "--user", "--scope", "--quiet", "--collect", "-p", "TasksMax="+strconv.Itoa(j.ScopePids), "--", os.Args[0], "__scoped__")
+	}
 	cmd.Env = append(os.Environ(), helperEnv+"="+string(b))
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -436,6 +456,12 @@ func runInit(j *job, p *plan.Plan, res *result) {
 			res.Err = err.Error()
 			return
 		}
+		if j.Saturating {
+			b, _ := io.ReadAll(r) // returns when the script (the only holder of the pipe) is done
+			r.Close()
+			res.Spawns = append(res.Spawns, spawnResult{Out: string(b)})
+			continue
+		}
 		var e initshim.Event
 		select {
 		case e = <-cl.Exits():
@@ -560,5 +586,50 @@ func TestLaunchVerifiesAllBindKinds(t *testing.T) {
 	r := runRaw(t, j) // fails on any verification mismatch
 	if len(r.Spawns) != 1 || !strings.Contains(r.Spawns[0].Out, "ok") {
 		t.Errorf("%+v", r.Spawns)
+	}
+}
+
+// S1 in the product: the session's limits bound a fork bomb inside the sandbox. The control run without a
+// scope proves the bomb is real (every fork succeeds), so the cap is what stops it.
+func TestForkBombIsBoundedByTheSessionScope(t *testing.T) {
+	const cap = 150
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 is needed for the fork loop (bash's fork retry/backoff makes a shell loop slow and flaky)")
+	}
+	bomb := "python3 -c '" + `
+import subprocess, os
+kids = []
+for _ in range(400):
+    try:
+        kids.append(subprocess.Popen(["sleep", "4"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    except OSError:
+        pass
+print("forked=%d" % len(kids))
+print("count=%d" % len([p for p in os.listdir("/proc") if p.isdigit()]))` + "'"
+	count := func(out string) int {
+		i := strings.Index(out, "count=")
+		if i < 0 {
+			t.Fatalf("no process count in the output:\n%s", out)
+		}
+		n, _ := strconv.Atoi(strings.TrimSpace(strings.SplitN(out[i+len("count="):], "\n", 2)[0]))
+		return n
+	}
+
+	j := baseJob()
+	j.InitScripts = []string{bomb}
+	j.Saturating = true
+	control := runRaw(t, j)
+	if n := count(control.Spawns[0].Out); n < 400 {
+		t.Fatalf("control run: only %d processes, the fork bomb must be able to start 400", n)
+	}
+
+	j.ScopePids = cap
+	capped := runRaw(t, j)
+	out := capped.Spawns[0].Out
+	if n := count(out); n < 10 || n > cap {
+		t.Errorf("with TasksMax=%d the sandbox held %d processes, want between 10 and %d", cap, n, cap)
+	}
+	if !strings.Contains(out, "fork") && !strings.Contains(out, "Resource temporarily unavailable") {
+		t.Errorf("the shell never reported a refused fork:\n%s", out)
 	}
 }

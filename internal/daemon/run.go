@@ -50,6 +50,11 @@ func (s *sessionState) status() Status {
 	defer s.mu.Unlock()
 	st := Status{ID: s.spec.ID, State: s.state, PID: os.Getpid(), Started: s.spec.Started, Workdir: s.spec.Workdir,
 		Roots: s.bins.Roots, Ports: []int{}, EnvNames: s.envNames, Warnings: s.bins.Warnings}
+	if s.spec.LimitsNote != "" {
+		st.Limits = LimitsStatus{Reason: s.spec.LimitsNote}
+	} else {
+		st.Limits = SelfUsage()
+	}
 	for _, e := range s.plan.Entries() {
 		if e.Kind == plan.Workspace {
 			mode := "rw"

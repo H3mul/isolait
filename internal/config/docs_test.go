@@ -19,7 +19,7 @@ func TestDocumentedKeysMatchLoader(t *testing.T) {
 	doc := string(raw)
 
 	var fromTable []string
-	for _, m := range regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\|").FindAllStringSubmatch(doc, -1) {
+	for _, m := range regexp.MustCompile("(?m)^\\| `([a-z_.]+)` \\|").FindAllStringSubmatch(doc, -1) {
 		fromTable = append(fromTable, m[1])
 	}
 	block := regexp.MustCompile("(?s)```toml\n(.*?)```").FindStringSubmatch(doc)
@@ -27,15 +27,16 @@ func TestDocumentedKeysMatchLoader(t *testing.T) {
 		t.Fatal("no toml example block in docs/config.md")
 	}
 	var fromExample []string
-	for _, m := range regexp.MustCompile("(?m)^([a-z_]+) = ").FindAllStringSubmatch(block[1], -1) {
-		fromExample = append(fromExample, m[1])
+	prefix := ""
+	for _, line := range strings.Split(block[1], "\n") {
+		if m := regexp.MustCompile(`^\[([a-z_]+)\]$`).FindStringSubmatch(line); m != nil {
+			prefix = m[1] + "."
+		} else if m := regexp.MustCompile(`^([a-z_]+) = `).FindStringSubmatch(line); m != nil {
+			fromExample = append(fromExample, prefix+m[1])
+		}
 	}
 
-	var real []string
-	rt := reflect.TypeOf(Layer{})
-	for i := 0; i < rt.NumField(); i++ {
-		real = append(real, rt.Field(i).Tag.Get("toml"))
-	}
+	real := tomlKeys(reflect.TypeOf(Layer{}), "")
 	for _, s := range [][]string{fromTable, fromExample, real} {
 		sort.Strings(s)
 	}
@@ -51,4 +52,19 @@ func TestDocumentedKeysMatchLoader(t *testing.T) {
 	if !strings.Contains(doc, "isolait trust") {
 		t.Error("trust model not documented")
 	}
+}
+
+// tomlKeys lists every settable key, flattening nested tables to dotted names.
+func tomlKeys(t reflect.Type, prefix string) []string {
+	var keys []string
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name := prefix + f.Tag.Get("toml")
+		if f.Type.Kind() == reflect.Ptr && f.Type.Elem().Kind() == reflect.Struct {
+			keys = append(keys, tomlKeys(f.Type.Elem(), name+".")...)
+			continue
+		}
+		keys = append(keys, name)
+	}
+	return keys
 }

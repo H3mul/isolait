@@ -24,6 +24,9 @@ type Spec struct {
 	HostPath    string
 	User        string
 	UID, GID    int
+	Limits      Limits   // resource limits for the session
+	SystemdRun  string   // path to systemd-run, empty when there is no systemd user manager
+	LimitsNote  string   // set by the launcher when limits could not be applied: why
 	Bwrap       string   // path to bwrap, resolved by the launcher (the daemon runs with an empty environment)
 	InitExe     string   // host path of the isolait binary, run inside the sandbox as the init shim
 	InitArgs    []string // arguments after the shim path (default: init); tests use their own
@@ -39,14 +42,15 @@ type MountInfo struct {
 
 // Status is what `isolait status` and `isolait list` show.
 type Status struct {
-	ID       string      `json:"id"`
-	State    string      `json:"state"` // idle (no agent running); attached and detached arrive with group 4
-	PID      int         `json:"pid"`   // the daemon
-	Started  time.Time   `json:"started"`
-	Workdir  string      `json:"workdir"`
-	Mounts   []MountInfo `json:"mounts"`
-	Roots    []string    `json:"roots"`    // tool roots exposed read-only
-	Ports    []int       `json:"ports"`    // open port grants
-	EnvNames []string    `json:"env"`      // variable names passed in (never values)
-	Warnings []string    `json:"warnings"` // start-time warnings, e.g. dangling links
+	ID       string       `json:"id"`
+	State    string       `json:"state"` // idle (no agent running); attached and detached arrive with group 4
+	PID      int          `json:"pid"`   // the daemon
+	Started  time.Time    `json:"started"`
+	Workdir  string       `json:"workdir"`
+	Mounts   []MountInfo  `json:"mounts"`
+	Roots    []string     `json:"roots"`    // tool roots exposed read-only
+	Ports    []int        `json:"ports"`    // open port grants
+	EnvNames []string     `json:"env"`      // variable names passed in (never values)
+	Warnings []string     `json:"warnings"` // start-time warnings, e.g. dangling links
+	Limits   LimitsStatus `json:"limits"`
 }
