@@ -110,12 +110,14 @@ Global and per-workspace TOML config, and the trust model for a repository's own
 ## Tests
 
 ```sh
-go test ./...                    # fast tier: units, parsers, protocol, plan
-go test -tags security ./...     # also runs the sandbox on the real kernel
+make test        # fast tier: units, parsers, protocol, plan (no kernel features needed)
+make security    # also runs the sandbox on the real kernel (needs user namespaces and bwrap)
+make canary      # only the host-assumption canaries: run after a kernel, bwrap or systemd upgrade
+make mutations   # apply deliberate regressions to a scratch copy; every one must fail a test
 ```
 
 [docs/security-tests.md](docs/security-tests.md) maps every security assumption validated by the feasibility
-spikes to the test that guards it and the change that proves the test fails when the assumption breaks.
+spikes to the test that guards it and the mutation that proves the test fails when the assumption breaks.
 
 ## Project
 
