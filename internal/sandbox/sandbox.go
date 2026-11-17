@@ -29,9 +29,12 @@ func Start(s Spec, p *plan.Plan, argv []string, extra []*os.File, stdin io.Reade
 	if len(argv) == 0 {
 		return nil, errors.New("sandbox: empty command")
 	}
-	bwrap, err := exec.LookPath("bwrap")
-	if err != nil {
-		return nil, errors.New("bwrap not found in PATH")
+	bwrap := s.Bwrap
+	if bwrap == "" {
+		var err error
+		if bwrap, err = exec.LookPath("bwrap"); err != nil {
+			return nil, errors.New("bwrap not found in PATH")
+		}
 	}
 	r, w, err := os.Pipe() // bwrap writes {"child-pid": N} here once the sandbox exists
 	if err != nil {

@@ -1,0 +1,259 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"os/user"
+	"path/filepath"
+	"strings"
+
+	"github.com/H3mul/isolait/internal/config"
+	"github.com/H3mul/isolait/internal/daemon"
+	"github.com/H3mul/isolait/internal/mounts"
+	"github.com/H3mul/isolait/internal/preflight"
+	"github.com/H3mul/isolait/internal/session"
+	"github.com/H3mul/isolait/internal/trust"
+	"github.com/spf13/cobra"
+)
+
+// deps are what the session commands need from the host; tests replace them.
+type deps struct {
+	paths   func() (config.Paths, error)
+	runtime func() (string, error)
+}
+
+func realDeps() deps { return deps{paths: config.DefaultPaths, runtime: session.RuntimeBase} }
+
+func sessionCmds(d deps) []*cobra.Command {
+	return []*cobra.Command{startCmd(d), listCmd(d), statusCmd(d), stopCmd(d), daemonCmd()}
+}
+
+// target resolves the session a command acts on: a positional id, else --sid, else the last attached.
+func target(cmd *cobra.Command, d deps, args []string) (base, id string, err error) {
+	if base, err = d.runtime(); err != nil {
+		return "", "", err
+	}
+	sid, _ := cmd.Flags().GetString("sid")
+	if len(args) > 0 {
+		sid = args[0]
+	}
+	id, err = daemon.ResolveTarget(base, sid)
+	return base, id, err
+}
+
+func daemonCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "daemon", Short: "Run a session daemon (internal)", Hidden: true, Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error { return daemon.RunFromFD() },
+	}
+}
+
+func listCmd(d deps) *cobra.Command {
+	return &cobra.Command{
+		Use: "list", Short: "List running sessions", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			base, err := d.runtime()
+			if err != nil {
+				return err
+			}
+			es, err := daemon.List(base)
+			if err != nil {
+				return err
+			}
+			if len(es) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "no sessions running")
+				return nil
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), daemon.FormatList(es))
+			return nil
+		},
+	}
+}
+
+func statusCmd(d deps) *cobra.Command {
+	return &cobra.Command{
+		Use: "status [sid]", Short: "Show a session's state, mounts, tool roots, ports and environment names", Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base, id, err := target(cmd, d, args)
+			if err != nil {
+				return err
+			}
+			st, err := daemon.Query(base, id)
+			if err != nil {
+				return fmt.Errorf("session %s: %w", id, err)
+			}
+			w := cmd.OutOrStdout()
+			fmt.Fprintf(w, "session  %s\nstate    %s\nworkdir  %s\n", st.ID, st.State, st.Workdir)
+			fmt.Fprintln(w, "mounts")
+			for _, m := range st.Mounts {
+				fmt.Fprintf(w, "  %-28s %s  (%s)\n", m.Path, m.Mode, m.Src)
+			}
+			fmt.Fprintf(w, "tool roots  %s\nports       %s\nenv         %s\n", orNone(st.Roots), orNone(intsToStrings(st.Ports)), orNone(st.EnvNames))
+			for _, warn := range st.Warnings {
+				fmt.Fprintf(w, "warning  %s\n", warn)
+			}
+			return nil
+		},
+	}
+}
+
+func stopCmd(d deps) *cobra.Command {
+	return &cobra.Command{
+		Use: "stop [sid]", Short: "Stop a session and release everything it holds", Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base, id, err := target(cmd, d, args)
+			if err != nil {
+				return err
+			}
+			if err := daemon.Stop(base, id); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "stopped %s\n", id)
+			return nil
+		},
+	}
+}
+
+func startCmd(d deps) *cobra.Command {
+	var ro, inheritEnv, inheritPath, allowUserns bool
+	var envNames []string
+	cmd := &cobra.Command{
+		Use:   "start [flags] <agent> [args...]",
+		Short: "Start a sandboxed session in the current directory",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			wd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			p, err := d.paths()
+			if err != nil {
+				return err
+			}
+			base, err := d.runtime()
+			if err != nil {
+				return err
+			}
+			if err := preflight.Run(preflight.System()); err != nil {
+				return err
+			}
+			flags := config.Layer{Env: envNames}
+			if cmd.Flags().Changed("inherit-env") {
+				flags.InheritEnv = &inheritEnv
+			}
+			if cmd.Flags().Changed("inherit-path") {
+				flags.InheritPath = &inheritPath
+			}
+			if cmd.Flags().Changed("allow-userns") {
+				flags.AllowUserns = &allowUserns
+			}
+			res, err := config.Load(p, wd, flags, trust.Open(p.StateDir))
+			if err != nil {
+				return err
+			}
+			for _, w := range res.Warnings {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
+			}
+			if err := checkWorkdir(wd, p, base); err != nil {
+				return err
+			}
+			exe, err := selfExe()
+			if err != nil {
+				return err
+			}
+			bwrap, err := exec.LookPath("bwrap")
+			if err != nil {
+				return err
+			}
+			u, err := user.Current()
+			if err != nil {
+				return err
+			}
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			id, err := session.Create(base, wd)
+			if err != nil {
+				return err
+			}
+			spec := daemon.Spec{
+				ID: id, RuntimeBase: base, StateDir: p.StateDir, Workdir: wd, Name: mounts.NameFor(wd), RO: ro,
+				Agent: args, HostEnv: os.Environ(), EnvNames: res.Config.Env, InheritEnv: res.Config.InheritEnv,
+				InheritPath: res.Config.InheritPath, Tools: res.Config.Tools, AllowUserns: res.Config.AllowUserns,
+				HostHome: home, HostPath: os.Getenv("PATH"), User: u.Username, UID: os.Getuid(), GID: os.Getgid(), InitExe: exe, Bwrap: bwrap,
+			}
+			if err := daemon.Launch(spec, exe); err != nil {
+				session.Remove(base, id)
+				return err
+			}
+			st, err := daemon.Query(base, id)
+			if err == nil {
+				for _, w := range st.Warnings {
+					fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
+				}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "started %s (idle: the agent is started when you attach)\n", id)
+			return nil
+		},
+	}
+	cmd.Flags().SetInterspersed(false) // flags belong to isolait only until the agent command starts
+	cmd.Flags().BoolVar(&ro, "ro", false, "mount the starting directory read-only")
+	cmd.Flags().StringArrayVar(&envNames, "env", nil, "forward this host environment variable into the sandbox (repeatable)")
+	cmd.Flags().BoolVar(&inheritEnv, "inherit-env", false, "forward the whole host environment (agent sockets are still withheld)")
+	cmd.Flags().BoolVar(&inheritPath, "inherit-path", false, "also expose host PATH directories under /usr/local, /opt and your home")
+	cmd.Flags().BoolVar(&allowUserns, "allow-userns", false, "allow nested user namespaces in the sandbox (weakens isolation)")
+	return cmd
+}
+
+// checkWorkdir refuses starting directories that contain or sit inside isolait's own directories, or that are
+// the whole filesystem or home directory. It is a string-based guard until the mount deny list (task 6.1,
+// by device and inode) replaces it.
+func checkWorkdir(wd string, p config.Paths, runtimeBase string) error {
+	home, _ := os.UserHomeDir()
+	real, err := filepath.EvalSymlinks(wd)
+	if err != nil {
+		return err
+	}
+	if real == "/" || (home != "" && real == home) {
+		return fmt.Errorf("refusing to start in %s: it contains everything the sandbox exists to keep away from the agent", real)
+	}
+	for _, dir := range []string{p.GlobalDir, p.StateDir, runtimeBase} {
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			dir = r
+		}
+		if related(real, dir) {
+			return fmt.Errorf("refusing to start in %s: it contains or is inside isolait's own directory %s", real, dir)
+		}
+	}
+	return nil
+}
+
+func related(a, b string) bool {
+	in := func(p, dir string) bool { return p == dir || strings.HasPrefix(p, strings.TrimRight(dir, "/")+"/") }
+	return in(a, b) || in(b, a)
+}
+
+func selfExe() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(exe)
+}
+
+func orNone(s []string) string {
+	if len(s) == 0 {
+		return "none"
+	}
+	return strings.Join(s, ", ")
+}
+
+func intsToStrings(n []int) []string {
+	var s []string
+	for _, v := range n {
+		s = append(s, fmt.Sprint(v))
+	}
+	return s
+}

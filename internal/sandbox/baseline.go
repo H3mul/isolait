@@ -33,6 +33,7 @@ type Spec struct {
 	Chdir       string   // initial working directory inside the sandbox
 	InitExe     string   // host path of the isolait binary, bound read-only at /isolait/init as the init shim
 	InitArgs    []string // arguments after /isolait/init (default: init)
+	Bwrap       string   // path to bwrap; empty means look it up on PATH
 	UID, GID    int
 }
 

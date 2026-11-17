@@ -48,6 +48,8 @@ func Root() *cobra.Command {
 		SilenceErrors: false,
 	}
 	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(config.DefaultPaths), initCmd())
+	root.AddCommand(sessionCmds(realDeps())...)
+	root.PersistentFlags().String("sid", "", "target this session instead of the last attached one")
 	return root
 }
 
