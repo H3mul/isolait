@@ -9,21 +9,20 @@ import (
 	"syscall"
 )
 
-// Capability numbers (linux/capability.h) the broker keeps as ambient capabilities.
-const capSysAdmin = 21
-
-// Command returns a command that runs exe with args as the broker: new user namespace with an identity
-// uid and gid map (the agent keeps the user's real ids), new mount namespace, detached from the caller's
-// session. A non-root process loses its capabilities on exec, so they are requested as ambient ones.
+// Command returns a command that runs exe with args as the broker: a new user namespace in which uid 0 and
+// gid 0 are the calling user (so the process holds all capabilities, but only inside that namespace), a new
+// mount namespace, and its own session.
+//
+// Why root-mapped and not an identity map with ambient capabilities: bwrap refuses to run when it holds
+// capabilities but is neither setuid nor uid 0 ("Unexpected capabilities but not setuid"). The sandbox's
+// processes still run as the user's real uid and gid: the launcher passes --uid and --gid to bwrap.
 func Command(exe string, args ...string) *exec.Cmd {
 	cmd := exec.Command(exe, args...)
-	uid, gid := os.Getuid(), os.Getgid()
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags:                 syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS,
-		UidMappings:                []syscall.SysProcIDMap{{ContainerID: uid, HostID: uid, Size: 1}},
-		GidMappings:                []syscall.SysProcIDMap{{ContainerID: gid, HostID: gid, Size: 1}},
+		UidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
+		GidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
 		GidMappingsEnableSetgroups: false,
-		AmbientCaps:                []uintptr{capSysAdmin},
 		Setsid:                     true,
 	}
 	return cmd

@@ -11,9 +11,9 @@ import (
 	"testing"
 )
 
-// Spike 1.1 assumption, now against the product recipe: the broker sees the host filesystem, holds
-// CAP_SYS_ADMIN (and only that) inside its own user namespace, can mount, and its mounts do not reach
-// the host mount namespace.
+// Spike 1.1 assumption, now against the product recipe: the broker sees the host filesystem, is uid 0 with
+// CAP_SYS_ADMIN inside its own user namespace only, can mount, owns the caller's files, and its mounts do not
+// reach the host mount namespace.
 
 const helperEnv = "ISOLAIT_BROKER_HELPER"
 
@@ -21,6 +21,7 @@ type report struct {
 	UID, GID    int
 	CapEff      uint64
 	SawHostFile bool
+	OwnsTempDir bool
 	MountErr    string
 	HostnameErr string
 	MountDir    string
@@ -47,6 +48,8 @@ func helper(dir string) {
 		}
 	}
 	r.SawHostFile = readFile("/etc/hostname") != "" || readFile("/etc/passwd") != ""
+	var st syscall.Stat_t
+	r.OwnsTempDir = syscall.Stat(dir, &st) == nil && st.Uid == 0 // the caller's own dir appears as root's
 	if err := syscall.Mount("tmpfs", dir, "tmpfs", 0, ""); err != nil {
 		r.MountErr = err.Error()
 	}
@@ -75,12 +78,12 @@ func TestBrokerNamespace(t *testing.T) {
 	if err := json.Unmarshal(out, &r); err != nil {
 		t.Fatalf("bad report %q: %v", out, err)
 	}
-	if r.UID != os.Getuid() || r.GID != os.Getgid() {
-		t.Errorf("ids %d/%d, want the caller's %d/%d (identity map)", r.UID, r.GID, os.Getuid(), os.Getgid())
+	if r.UID != 0 || r.GID != 0 || !r.OwnsTempDir {
+		t.Errorf("ids %d/%d ownsTempDir=%v: the caller must map to uid/gid 0", r.UID, r.GID, r.OwnsTempDir)
 	}
 	const sysAdmin = 1 << 21
-	if r.CapEff != sysAdmin {
-		t.Errorf("CapEff=%#x, want exactly CAP_SYS_ADMIN (%#x)", r.CapEff, sysAdmin)
+	if r.CapEff&sysAdmin == 0 {
+		t.Errorf("CapEff=%#x lacks CAP_SYS_ADMIN", r.CapEff)
 	}
 	if !r.SawHostFile {
 		t.Error("broker cannot see the host filesystem")
