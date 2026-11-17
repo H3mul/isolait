@@ -113,6 +113,7 @@ func TestNoMountArgumentsOutsidePlan(t *testing.T) {
 	exempt := map[string]string{
 		filepath.Join(root, "internal", "preflight", "system.go"):              "throwaway probe sandbox that only checks bwrap can create a user namespace; it never runs an agent",
 		filepath.Join(root, "internal", "sandbox", "sandbox_security_test.go"): "injects deliberate bwrap misconfigurations to prove the mount check catches them",
+		filepath.Join(root, "internal", "canary", "canary_security_test.go"):   "canaries drive bwrap directly on purpose, independent of the product's plan, to test the host's behaviour",
 	}
 	forbidden := []string{`"--bind"`, `"--ro-bind"`, `"--bind-try"`, `"--ro-bind-try"`, `"--dev-bind"`, `"--tmpfs"`, `"--proc"`, `"--dev"`, `"--symlink"`, `"--remount-ro"`, `"--ro-bind-data"`, `"--bind-data"`, `"--overlay"`, `"--ro-overlay"`, `"--tmp-overlay"`}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
