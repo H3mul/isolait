@@ -46,7 +46,7 @@ func Root() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}
-	root.AddCommand(versionCmd())
+	root.AddCommand(versionCmd(), preflightCmd())
 	return root
 }
 
