@@ -129,3 +129,29 @@ func TestBuildEnv(t *testing.T) {
 		t.Error("a name containing = must be rejected")
 	}
 }
+
+// 3.10: the global config dir, isolait's state dir (apart from the one per-agent home inside it) and the
+// runtime dir are never part of the sandbox, not even as an ancestor of a bound path.
+func TestIsolaitDirsNeverExposed(t *testing.T) {
+	cfg, state, rt := "/home/fake/.config/isolait", "/home/fake/.local/state/isolait", "/run/user/1000/isolait"
+	s := testSpec()
+	s.AgentHome = state + "/homes/claude"
+	s.Stage = rt + "/api-a3f9/stage"
+	p, err := BuildPlan(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	under := func(path, dir string) bool { return path == dir || strings.HasPrefix(path, dir+"/") }
+	for _, e := range p.Entries() {
+		if e.Src == "" {
+			continue
+		}
+		for _, dir := range []string{cfg, state, rt} {
+			ancestor := under(dir, e.Src) // binding a parent of a protected dir would expose it
+			inside := under(e.Src, dir)
+			if ancestor || (inside && e.Src != s.AgentHome && e.Src != s.Stage) {
+				t.Errorf("plan entry %+v exposes or contains the protected directory %s", e, dir)
+			}
+		}
+	}
+}

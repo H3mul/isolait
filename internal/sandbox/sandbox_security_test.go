@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/H3mul/isolait/internal/broker"
+	"github.com/H3mul/isolait/internal/mounts"
 )
 
 // Real-kernel tests for the baseline (spikes 1.3 and 1.5, now against the product code). Each test re-executes
@@ -28,6 +29,12 @@ type job struct {
 	EnvNames    []string
 	InheritEnv  bool
 	AllowUserns bool
+	Workspace   *workspace
+}
+
+type workspace struct {
+	Src, Name string
+	RO        bool
 }
 
 type result struct {
@@ -71,6 +78,21 @@ func helper() {
 	if err != nil {
 		fail(err)
 		return
+	}
+	if w := j.Workspace; w != nil {
+		empty := filepath.Join(filepath.Dir(j.Spec.Stage), "empty")
+		os.MkdirAll(empty, 0o755)
+		masked, err := mounts.MountWorkspace(j.Spec.Stage, w.Name, w.Src, w.RO, empty)
+		if err != nil {
+			fail(err)
+			return
+		}
+		dst, err := AddWorkspace(p, w.Name, w.Src, w.RO, masked, empty)
+		if err != nil {
+			fail(err)
+			return
+		}
+		j.Spec.Chdir = dst
 	}
 	var out, errb bytes.Buffer
 	sb, err := Start(j.Spec, p, []string{"/bin/sh", "-c", j.Script}, nil, &out, &errb)
@@ -234,5 +256,57 @@ func TestTmpDoesNotPersistAcrossSessions(t *testing.T) {
 	kv = runJob(t, baseJob())
 	if kv["tmppersisted"] != "no" {
 		t.Errorf("/tmp persisted across sessions: %q", kv["tmppersisted"])
+	}
+}
+
+// 3.7 and 3.10 end to end: the starting directory appears at /workspaces/<name> (rw or ro), is the working
+// directory, and its .isolait is masked while the host copy stays untouched.
+func TestStartingWorkspace(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "myproj")
+	must(t, os.MkdirAll(filepath.Join(src, ".isolait"), 0o755))
+	must(t, os.WriteFile(filepath.Join(src, "f"), []byte("data"), 0o644))
+	must(t, os.WriteFile(filepath.Join(src, ".isolait", "config"), []byte("secret"), 0o644))
+	script := `
+echo cwd=$(pwd)
+echo read=$(cat f)
+echo write=$(echo y > created 2>/dev/null && echo ok || echo failed)
+echo maskentries=$(ls -A .isolait | wc -l)
+echo maskwrite=$(echo x > .isolait/x 2>/dev/null && echo ok || echo failed)
+echo ls=$(ls -A /workspaces)
+`
+	rw := baseJob()
+	rw.Script, rw.Workspace = script, &workspace{Src: src, Name: "myproj"}
+	kv := runJob(t, rw)
+	for k, w := range map[string]string{"cwd": "/workspaces/myproj", "read": "data", "write": "ok", "maskentries": "0", "maskwrite": "failed", "ls": "myproj"} {
+		if kv[k] != w {
+			t.Errorf("rw: %s = %q, want %q", k, kv[k], w)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(src, "created")); err != nil || string(b) != "y\n" {
+		t.Errorf("rw write did not reach the host: %v %q", err, b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(src, ".isolait", "config")); string(b) != "secret" {
+		t.Error("host .isolait/config was modified")
+	}
+	if _, err := os.Stat(filepath.Join(src, ".isolait", "x")); err == nil {
+		t.Error("the agent wrote into the host .isolait")
+	}
+
+	os.Remove(filepath.Join(src, "created"))
+	ro := rw
+	ro.Workspace = &workspace{Src: src, Name: "myproj", RO: true}
+	kv = runJob(t, ro)
+	if kv["write"] != "failed" || kv["read"] != "data" || kv["cwd"] != "/workspaces/myproj" {
+		t.Errorf("ro: %v", kv)
+	}
+	if _, err := os.Stat(filepath.Join(src, "created")); err == nil {
+		t.Error("a --ro workspace accepted a write")
+	}
+}
+
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }
