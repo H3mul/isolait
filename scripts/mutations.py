@@ -72,6 +72,16 @@ M = [
      "./internal/initshim", "TestSpawnExitCodeAndOutput", False, 90),
     ("M22", "internal/daemon/run.go", "return session.Remove(spec.RuntimeBase, spec.ID)", "return nil",
      "./internal/daemon", "TestSessionLifecycle", True, 150),
+    ("M23", "internal/term/sanitize.go", "ok := s.n <= maxOSC && len(body) >= 2 && body[0] == '8' && body[1] == ';'", "ok := true",
+     "./internal/term", "TestSanitizeTable|TestRandomStreamsNeverLeakForbiddenSequences", False, 60),
+    ("M24", "internal/term/sanitize.go", "if final == 't' {", "if false {",
+     "./internal/term", "TestSanitizeTable|TestRandomStreamsNeverLeakForbiddenSequences", False, 60),
+    ("M25", "internal/term/sanitize.go", "case b == 'P' || b == '_' || b == '^' || b == 'X':", "case false:",
+     "./internal/term", "TestSanitizeTable|TestRandomStreamsNeverLeakForbiddenSequences", False, 60),
+    ("M26", "internal/term/sanitize.go", 'case "2004":', 'case "2004x":',
+     "./internal/term", "TestSanitizeTable|TestModesAreTracked", False, 60),
+    ("M27", "internal/term/sanitize.go", "s.out = s.out[:0]\n\tfor _, b := range p {", "s.out = s.out[:0]\n\ts.st = gnd\n\tfor _, b := range p {",
+     "./internal/term", "TestSplitReadsGiveTheSameOutput|TestRandomStreamsNeverLeakForbiddenSequences", False, 60),
 ]
 
 
