@@ -5,8 +5,28 @@ and `sandbox-hardening/spikes`) to the Go test that guards it in this repository
 the test fails when the assumption is broken. Rule: a task that implements a spike-validated mechanism adds its
 row and its test in the same change.
 
-Tiers: **fast** tests run under `go test ./...`; **security** tests need real user namespaces and run with
-`go test -tags security ./...` (they `t.Skip` with a reason when the kernel feature is missing, never pass vacuously).
+## Running
+
+| Command | What it runs | When |
+|---|---|---|
+| `make check` | `gofmt` and `go vet` (both tiers) | every change |
+| `make test` | **fast tier** under `-race`: units, parsers, protocol, plan; no kernel features | every change |
+| `make security` | fast tier plus the **security tier** (`-tags security`): the real sandbox on the real kernel; tests `t.Skip` with a reason when a host feature is missing, never pass vacuously | every change where user namespaces work; CI |
+| `make canary` | only the **host-assumption canaries** (`internal/canary`) | after a kernel, bwrap or systemd upgrade, and in CI |
+| `make mutations` | applies every mutation below to a scratch copy and requires a test to fail | when you touch a guard test or a guarded line; before a release |
+
+CI (`.github/workflows/ci.yml`) runs `make check`, `make test`, `make security` and `make canary`; it lifts Ubuntu
+24.04's AppArmor userns restriction for the test run only. The workflow has not run on GitHub yet.
+
+**Canaries** are small tests of the kernel, bwrap and systemd behaviours the design depends on. They use bwrap and
+the mount primitive directly and almost none of the product, so an upgrade that changes a behaviour fails them even
+when no isolait code changed. **Mutations** (`scripts/mutations.py`) are deliberate regressions; the runner fails
+on a survivor, on a target string that no longer exists in the source, and on a mutation that does not compile.
+
+**Rule:** a task that implements a spike-validated mechanism adds its matrix row, its test and, where a guarded
+line exists, its mutation in the same change.
+
+## Matrix
 
 | Spike | Assumption | Design decision | Guard test | Mutation that must fail it | Tier |
 |---|---|---|---|---|---|
@@ -39,3 +59,62 @@ Tiers: **fast** tests run under `go test ./...`; **security** tests need real us
 | S1 | The session's `limits.pids` bounds a fork bomb inside the sandbox; the uncapped control run proves the bomb is real (400 processes), the capped run holds at most the cap and the shell reports refused forks | Decision 4 (resource limits) | `sandbox.TestForkBombIsBoundedByTheSessionScope` | run the scope without `TasksMax` (verified: 402 processes held) | security |
 | S1 | The daemon starts inside `isolait-<sid>.scope` with the configured `TasksMax`, `MemoryMax` and `CPUQuota`, `status` reports usage, and the scope disappears on stop | Decision 4 | `daemon.TestLimitsAppliedThroughScope`, `daemon.TestScopeArgs`, `daemon.TestReadUsage` | drop a `-p` property from `ScopeArgs` | fast + security |
 | S1 | Without a systemd user manager (or when the scope fails) the session still starts and `status` says why limits are unavailable; with `limits.required` the start is refused | Decision 4 | `daemon.TestLimitsUnavailableIsVisibleAndNotFatal`, `daemon.TestRequiredLimitsRefuseToStartWithoutSystemd`, `config.TestLimitsDefaultsMergeAndValidation` | silently ignore a failed scope | fast + security |
+
+## Host-assumption canaries
+
+| Spike | Host behaviour | Canary | Control that proves it can fail | Tier |
+|---|---|---|---|---|
+| tools | bwrap is at least 0.8 and still documents every flag the sandbox argv uses (`--disable-userns`, `--as-pid-1`, `--info-fd`, `--block-fd`, `--unshare-cgroup-try`, `--uid`, `--gid`, ...) | `canary.TestCanaryBwrapFeatures` | n/a: it reads the tool | security |
+| 1.1, 1.3 | A mount the broker makes under the stage appears in the sandbox; the sandbox's `/workspaces` is a slave (nothing leaks back, nothing is shared); an unmount reaches the sandbox | `canary.TestCanaryMountPropagation` | n/a: propagation is the positive result | security |
+| 1.2 | Even with capabilities the sandbox cannot remount a propagated read-only mount read-write (`MNT_LOCKED`) | `canary.TestCanaryMountsAreLocked` | n/a | security |
+| 1.4 | An `open_tree` + `mount_setattr` + `move_mount` clone is never writable from its first visible instant | `canary.TestCanaryReadOnlyCloneIsNeverWritable` | `mount --bind` + `remount,ro` lets all 300 writes through (verified 3 of 3) | security |
+| 1.5 | Nested user namespaces are blockable with `--disable-userns` under the broker's own nesting, even with capabilities | `canary.TestCanaryNestedUsernsBlocked` | the same probe without the flag reports the nested userns allowed (the test asserts this control) | security |
+| 1.6, 1.7 | A tap device can be created in a private network namespace and stays invisible outside it | `canary.TestCanaryTapInPrivateNetns` | skips without `/dev/net/tun` | security |
+| S1 | A systemd user scope applies `TasksMax` and `MemoryMax`, keeps a process that forked away from its launcher, and `cgroup.kill` is writable by the user and removes it | `canary.TestCanaryCgroupScope` | skips without a user manager | security |
+
+## Mutations (`make mutations`)
+
+Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
+(22 of 22) on 2026-11-17.
+
+| Id | Regression | Must fail |
+|---|---|---|
+| M01 | Broker without `CLONE_NEWNS` | `broker.TestCommandRecipe`, `TestBrokerNamespace` |
+| M02 | No `--disable-userns` | `sandbox.TestHardeningFlags`, `TestBaselineIsolation`, `TestNestedUsernsOptIn` |
+| M03 | No `--unshare-net` | `sandbox.TestHardeningFlags`, `TestBaselineIsolation` |
+| M04 | No `--die-with-parent` | `sandbox.TestHardeningFlags` |
+| M05 | Environment inherited by default | `sandbox.TestBuildEnv` |
+| M06 | `--inherit-path` always on | `sandbox.TestInheritPathFilter`, `TestAgentBehindSymlink` |
+| M07 | Agent install root never exposed | `sandbox.TestAgentBehindSymlink`, `TestBinaryExposure` |
+| M08 | Workspace clone without the read-only attribute | `mounts.TestWorkspaceMountPrimitive` |
+| M09 | Recursive clone (host submounts carried along) | `mounts.TestWorkspaceMountPrimitive` |
+| M10 | `.isolait` mask skipped | `mounts.TestWorkspaceMountPrimitive` |
+| M11 | Mount verification skipped at launch | `sandbox.TestStartVerificationAbortsOnMisconfiguration` |
+| M12 | Mount flag checks disabled | `mountcheck.TestMismatchesAreReported`, `TestWorkspaceAndMaskEntries` |
+| M13 | Workspace config applied without trust | `config.TestUntrustedWorkspaceConfigIgnoredEntirely`, `TestTrustAppliesAndModificationRevokes` |
+| M14 | Workspace config symlinks followed | `config.TestWorkspaceSymlinksRefused` |
+| M15 | Path-like session ids accepted | `daemon.TestResolveTarget` |
+| M16 | `start` workdir guard disabled | `cli.TestCheckWorkdir` |
+| M17 | Runtime dir with group/other access accepted | `session.TestEnsurePrivateDirRefusals` |
+| M18 | Duplicate plan destinations accepted | `plan.TestAddRejects` |
+| M19 | Scope without `TasksMax` | `daemon.TestScopeArgs` |
+| M20 | Memory limit never passed to the scope | `daemon.TestScopeArgs` |
+| M21 | Init shim never reaps or reports exits | `initshim.TestSpawnExitCodeAndOutput` |
+| M22 | Daemon leaves its runtime dir behind | `daemon.TestSessionLifecycle` |
+
+Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
+it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not
+testable here: the control socket's peer-uid check (needs a second user; `ctl.TestPeerUIDIsChecked` covers the
+credential read, and the 0700 runtime directory is the primary defence).
+
+## Pending: assumptions whose code is not written yet
+
+| Spike | Assumption | Design decision | Lands with | Guard test (planned) |
+|---|---|---|---|---|
+| 1.6 | The user-space netstack forwards TCP and answers DNS at the measured rate; the destination policy is checked on the address actually dialed, so a name that resolves to a private address, loopback, link-local or metadata range is refused (DNS rebinding); a refused upstream is a refused guest connect | Decision 5 | 5.1 to 5.5 | `netd` tests plus a security test per blocked range; mutation: skip the dial-time check |
+| 1.6 | Non-DNS UDP, ICMP and IPv6 from the sandbox are dropped; the sandbox sees only the managed interface | Decision 5 | 5.2, 5.4 | security test; mutation: leave IPv6 enabled |
+| 1.7 | A port grant is a listener on the sandbox loopback forwarded to host `127.0.0.1`; reachable only after `allow`, refused after `deny`, other host services unreachable | Decision 5 | 7.1 to 7.3 | security test; mutation: listen before the grant |
+| 1.8 | The PTY relay redraws on attach and handles alt-screen apps; the output sanitizer drops OSC 52, title and report sequences, DCS/APC/PM and window-manipulation CSI, including sequences split across reads | Decision 4 | 4.2, 4.3 | `relay` and `sanitizer` tests; mutation: pass OSC 52 through |
+| 1.2, 1.9 | A busy workspace is reported with its blocking processes; `--force` detaches lazily; a protected path or any ancestor is refused by dev+inode, including after a symlink swap | Decisions 2, 3 | 6.1, 6.4, 6.7 | deny-list unit tests plus a security test; mutation: compare paths as strings |
+| 1.3 | The sandbox cannot reach the control socket or the runtime directory (probe from inside); no unapproved network | Decision 4 | 8.2 | the isolation regression suite |
+| S2 to S4 | Landlock ceiling | `sandbox-hardening` D2 and D3 | deferred to Phase 2 | S2 to S4 spikes remain in the store; revisit triggers in the design |
