@@ -36,6 +36,7 @@ type job struct {
 	Workspace   *workspace
 	Bin         *BinOptions
 	InitScripts []string // run the init shim as PID 1 and spawn each script in turn
+	Tamper      string   // "extra-bind" or "no-ro": inject a bwrap misconfiguration the mount check must catch
 }
 
 type workspace struct {
@@ -136,6 +137,9 @@ func helper() {
 		}
 		j.Spec.Chdir = dst
 	}
+	if j.Tamper != "" {
+		renderArgs = tamper(j.Tamper, filepath.Dir(j.Spec.Stage))
+	}
 	if len(j.InitScripts) > 0 {
 		runInit(&j, p, &res)
 		return
@@ -168,6 +172,15 @@ func runJob(t *testing.T, j job) map[string]string {
 
 func runRaw(t *testing.T, j job) result {
 	t.Helper()
+	r := runRawAllowErr(t, j)
+	if r.Err != "" {
+		t.Fatalf("sandbox failed: %s\nstderr: %s", r.Err, r.Stderr)
+	}
+	return r
+}
+
+func runRawAllowErr(t *testing.T, j job) result {
+	t.Helper()
 	root := t.TempDir()
 	j.Spec.Stage = filepath.Join(root, "stage")
 	j.Spec.AgentHome = filepath.Join(root, "agenthome")
@@ -197,9 +210,6 @@ func runRaw(t *testing.T, j job) result {
 	}
 	if strings.Contains(r.Err, "operation not permitted") || strings.Contains(r.Stderr, "No permissions to create new namespace") {
 		t.Skipf("bwrap cannot create namespaces here: %s %s", r.Err, r.Stderr)
-	}
-	if r.Err != "" {
-		t.Fatalf("sandbox failed: %s\nstderr: %s", r.Err, r.Stderr)
 	}
 	r.AgentHome = j.Spec.AgentHome // for persistence assertions
 	return r
@@ -408,26 +418,13 @@ echo otherdir=$([ -e ` + other + ` ] && echo visible || echo absent)
 
 // runInit starts the sandbox with the init shim as PID 1 and runs each script through it, one after the other.
 func runInit(j *job, p *plan.Plan, res *result) {
-	d, sb2, err := initshim.Socketpair()
+	j.Spec.InitArgs = []string{"__isolait_init__"}
+	sb, cl, err := Launch(j.Spec, p, os.Stderr)
 	if err != nil {
 		res.Err = err.Error()
 		return
 	}
-	sb, err := Start(j.Spec, p, []string{InitPath, "__isolait_init__"}, []*os.File{sb2}, nil, nil, os.Stderr)
-	sb2.Close()
-	if err != nil {
-		res.Err = err.Error()
-		return
-	}
-	cl, err := initshim.NewClient(d)
-	if err != nil {
-		res.Err = err.Error()
-		return
-	}
-	if res.HelloPID, err = cl.WaitHello(10 * time.Second); err != nil {
-		res.Err = err.Error()
-		return
-	}
+	res.HelloPID = sb.ShimPID
 	env := []string{"PATH=/usr/bin:/bin", "HOME=" + j.Spec.HostHome}
 	for _, script := range j.InitScripts {
 		in, _ := os.Open(os.DevNull)
@@ -490,5 +487,78 @@ func TestInitShimLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(r.Spawns[2].Out, "zombies=0") {
 		t.Errorf("orphans were not reaped: %q", r.Spawns[2].Out)
+	}
+}
+
+// tamper returns an argument renderer that applies a deliberate misconfiguration after the plan was rendered,
+// so the plan (the oracle) and the real mounts disagree.
+func tamper(kind, dir string) func(Spec, *plan.Plan, ...string) []string {
+	return func(s Spec, p *plan.Plan, extra ...string) []string {
+		a := Args(s, p, extra...)
+		switch kind {
+		case "extra-bind":
+			os.MkdirAll(filepath.Join(dir, "extra"), 0o755)
+			return append(a, "--bind", filepath.Join(dir, "extra"), "/extra")
+		case "no-ro":
+			for i := range a {
+				if a[i] == "--ro-bind" && i+2 < len(a) && a[i+2] == "/etc/passwd" {
+					a[i] = "--bind" // /etc/passwd is root-owned: the sandbox user still cannot write it
+				}
+			}
+		}
+		return a
+	}
+}
+
+// 3.12: Launch compares the live mount table with the plan before anything runs. A healthy start passes
+// (every init-shim test above goes through it); injected misconfigurations abort the start with a diff.
+func TestStartVerificationAbortsOnMisconfiguration(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "proj")
+	must(t, os.MkdirAll(filepath.Join(src, ".isolait"), 0o755))
+	for _, tc := range []struct{ tamper, want string }{
+		{"extra-bind", "unplanned mount /extra"},
+		{"no-ro", "/etc/passwd (ro-bind) should be ro"},
+	} {
+		t.Run(tc.tamper, func(t *testing.T) {
+			j := baseJob()
+			j.Workspace = &workspace{Src: src, Name: "proj"}
+			j.InitScripts = []string{"echo should-never-run"}
+			j.Tamper = tc.tamper
+			r := runRawAllowErr(t, j)
+			if !strings.Contains(r.Err, "do not match the plan") || !strings.Contains(r.Err, tc.want) {
+				t.Fatalf("start was not aborted with the expected diff; err=%q spawns=%+v", r.Err, r.Spawns)
+			}
+			if len(r.Spawns) != 0 {
+				t.Errorf("a process ran in a sandbox that failed verification: %+v", r.Spawns)
+			}
+		})
+	}
+}
+
+// A healthy start with every kind of bind (agent install root, tools root, inherited PATH dir, workspace
+// with mask) verifies against its plan.
+func TestLaunchVerifiesAllBindKinds(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	home := filepath.Join(root, "home")
+	real := filepath.Join(home, ".local/share/agent/versions/1")
+	must(t, os.MkdirAll(filepath.Dir(real), 0o755))
+	must(t, os.WriteFile(real, []byte("#!/bin/sh\n"), 0o755))
+	must(t, os.MkdirAll(filepath.Join(home, ".local/bin"), 0o755))
+	must(t, os.Symlink(real, filepath.Join(home, ".local/bin/agent")))
+	tools := filepath.Join(root, "toolchain")
+	must(t, os.MkdirAll(filepath.Join(tools, "bin"), 0o755))
+	extra := filepath.Join(home, "extrabin")
+	must(t, os.MkdirAll(extra, 0o755))
+	src := filepath.Join(root, "proj")
+	must(t, os.MkdirAll(filepath.Join(src, ".isolait"), 0o755))
+
+	j := baseJob()
+	j.Workspace = &workspace{Src: src, Name: "proj", RO: true}
+	j.Bin = &BinOptions{Agent: "agent", HostPath: filepath.Join(home, ".local/bin") + ":" + extra + ":/usr/bin", Home: home,
+		Tools: []string{tools}, InheritPath: true, InheritPrefixes: []string{home}}
+	j.InitScripts = []string{"echo ok"}
+	r := runRaw(t, j) // fails on any verification mismatch
+	if len(r.Spawns) != 1 || !strings.Contains(r.Spawns[0].Out, "ok") {
+		t.Errorf("%+v", r.Spawns)
 	}
 }

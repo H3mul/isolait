@@ -11,10 +11,14 @@ import (
 	"github.com/H3mul/isolait/internal/plan"
 )
 
+// renderArgs is Args; tests replace it to inject a misconfiguration and prove the mount check catches it.
+var renderArgs = Args
+
 // Sandbox is a running bwrap. PID 1 inside it is the command passed to Start.
 type Sandbox struct {
 	Cmd      *exec.Cmd
 	ChildPID int // PID of the sandbox's PID 1 as seen from the broker
+	ShimPID  int // the init shim's own PID inside the sandbox (set by Launch; 1 when it is PID 1)
 	Plan     *plan.Plan
 }
 
@@ -35,7 +39,7 @@ func Start(s Spec, p *plan.Plan, argv []string, extra []*os.File, stdin io.Reade
 	}
 	defer r.Close()
 
-	args := Args(s, p, "--info-fd", "3")
+	args := renderArgs(s, p, "--info-fd", "3")
 	args = append(args, "--")
 	args = append(args, argv...)
 	cmd := exec.Command(bwrap, args...)
