@@ -28,7 +28,7 @@ type deps struct {
 func realDeps() deps { return deps{paths: config.DefaultPaths, runtime: session.RuntimeBase} }
 
 func sessionCmds(d deps) []*cobra.Command {
-	return []*cobra.Command{startCmd(d), attachCmd(d), execCmd(d), listCmd(d), statusCmd(d), stopCmd(d), daemonCmd(), spawnCmd()}
+	return []*cobra.Command{startCmd(d), attachCmd(d), execCmd(d), listCmd(d), statusCmd(d), stopCmd(d), mountCmd(d), unmountCmd(d), daemonCmd(), spawnCmd()}
 }
 
 // target resolves the session a command acts on: a positional id, else --sid, else the last attached.
@@ -311,4 +311,52 @@ func humanBytes(n uint64) string {
 		return fmt.Sprintf("%.0fK", float64(n)/k)
 	}
 	return fmt.Sprintf("%dB", n)
+}
+
+func mountCmd(d deps) *cobra.Command {
+	var ro bool
+	var as string
+	cmd := &cobra.Command{
+		Use: "mount [--ro] [--as name] <dir>", Short: "Mount a host directory into the running session at /workspaces/<name>", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base, id, err := target(cmd, d, nil)
+			if err != nil {
+				return err
+			}
+			src, err := filepath.Abs(args[0])
+			if err != nil {
+				return err
+			}
+			mi, err := daemon.AddMount(base, id, src, as, ro)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "mounted %s at %s (%s)\n", mi.Src, mi.Path, mi.Mode)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&ro, "ro", false, "mount read-only")
+	cmd.Flags().StringVar(&as, "as", "", "name under /workspaces (default: the directory's name)")
+	return cmd
+}
+
+func unmountCmd(d deps) *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use: "unmount [--force] <name>", Short: "Remove a mount from the running session", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base, id, err := target(cmd, d, nil)
+			if err != nil {
+				return err
+			}
+			name := strings.TrimPrefix(args[0], "/workspaces/")
+			if err := daemon.RemoveMount(base, id, name, force); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "unmounted %s\n", name)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "detach even if processes still use it (they may keep stale handles)")
+	return cmd
 }

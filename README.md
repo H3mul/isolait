@@ -124,6 +124,40 @@ answerback request are dropped; colours, cursor movement, hyperlinks and the alt
 Sequences split across reads are handled. This is a filter, not a terminal emulator: it narrows what an agent can
 do to your terminal and does not claim to eliminate terminal injection.
 
+## Mounting more directories
+
+While a session runs you can add and remove directories without restarting the agent. Run these from a shell,
+or type them in the leader prompt:
+
+```sh
+isolait mount ../shared-lib              # at /workspaces/shared-lib, read-write
+isolait mount --ro --as docs ~/notes     # at /workspaces/docs, read-only
+isolait unmount docs                     # refuses while a process uses it
+isolait unmount --force docs             # detach anyway
+```
+
+`isolait status` lists every mount. The agent sees a new mount immediately; a read-only mount is never visible
+as writable, and every mount is `nosuid` and `nodev`. Names follow the directory's name unless you pass `--as`,
+and a name that is taken is an error.
+
+What is refused: the filesystem root, your home directory and every directory that contains it (but not
+directories inside it), and isolait's own config, state and runtime directories and anything inside them or
+containing them. Checks compare device and inode, so symlinks and `..` do not disguise a protected directory.
+A directory whose `.isolait` is not a plain directory is refused. Otherwise a `.isolait` at the top of a mounted
+directory is masked, and only the starting directory's config is ever read. Submounts on the host below the
+source (other disks, network shares) are not carried into the sandbox.
+
+After every change the sandbox's real mount table is compared with the plan; on a mismatch the new mount is
+rolled back and the command fails.
+
+Residual risks to weigh before mounting:
+
+- A read-write mount lets the agent plant files that your own tools later run (git hooks, scripts, build
+  files). Use `--ro` when it only needs to read.
+- Unix sockets inside a mounted directory stay connectable from the sandbox, whatever the mount flags.
+- `unmount --force` detaches lazily: a process still using the mount keeps working with stale handles.
+- Mounts are made on your behalf by the session's broker; the sandbox itself can never mount anything.
+
 ## What the sandbox contains
 
 The agent sees only this, all built from one plan that is checked against the live mount table before anything

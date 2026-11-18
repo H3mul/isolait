@@ -200,6 +200,22 @@ M = [
      "./internal/netd", "TestTheEnginePolicyRefusesTheHostsOwnAddresses", False, 90),
     ("M86", "internal/daemon/run.go", "bs.OnNetns = func(pid int) error {", "_ = func(pid int) error {",
      "./internal/daemon", "TestSandboxNetworkEndToEnd|TestEngineProcessIsHardenedAndSurvivesSandboxSignals", True, 120),
+    ("M87", "internal/mounts/deny.go", "case d.self[i] == src:", "case false:",
+     "./internal/mounts", "TestDenyList$", False, 60),
+    ("M88", "internal/mounts/deny.go", "case d.ids[i][src]:", "case false:",
+     "./internal/mounts", "TestDenyList$", False, 60),
+    ("M89", "internal/mounts/deny.go", "case e.inside && ancestors[d.self[i]]:", "case false:",
+     "./internal/mounts", "TestDenyList", False, 60),
+    ("M90", "internal/mounts/deny.go", "if len(chain) == 1 {", "if false {",
+     "./internal/mounts", "TestDenyList$", False, 60),
+    ("M91", "internal/daemon/hotmounts.go", "masked, err := mounts.MountWorkspace(h.stage, name, src, ro, h.empty, h.deny)", "masked, err := mounts.MountWorkspace(h.stage, name, src, ro, h.empty, nil)",
+     "./internal/daemon", "TestHotMountRefusals", True, 120),
+    ("M92", "internal/daemon/hotmounts.go", "if !force {", "if false {",
+     "./internal/daemon", "TestRemoveBusyForcedAndSwitch", True, 120),
+    ("M93", "internal/daemon/hotmounts.go", "if err := mountcheck.Verify(h.box.ChildPID, h.plan); err != nil {\n\t\th.plan.Remove(dst + \"/.isolait\")", "if err := error(nil); err != nil {\n\t\th.plan.Remove(dst + \"/.isolait\")",
+     "./internal/daemon", "TestUnplannedMountIsRolledBack", True, 120),
+    ("M94", "internal/daemon/hotmounts.go", "h.detach(name)\n\th.plan.Remove(dst + \"/.isolait\")\n\th.plan.Remove(dst)\n\tif err", "h.plan.Remove(dst + \"/.isolait\")\n\th.plan.Remove(dst)\n\tif err",
+     "./internal/daemon", "TestRemoveBusyForcedAndSwitch", True, 120),
 ]
 
 
