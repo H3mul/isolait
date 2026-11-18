@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	"github.com/H3mul/isolait/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -39,16 +38,19 @@ func Version() string {
 	return "dev"
 }
 
-// Root builds the command tree. Errors are printed once by cobra; main only maps them to the exit code.
-func Root() *cobra.Command {
+// Root builds the command tree for this host.
+func Root() *cobra.Command { return rootWith(realDeps()) }
+
+// rootWith builds the command tree on the given host dependencies (tests and the in-session prompt pass their own).
+func rootWith(d deps) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "isolait",
 		Short:         "Run AI coding agents in a rootless, zero-trust sandbox",
 		SilenceUsage:  true,
 		SilenceErrors: true, // main prints errors, except an ExitError, which is only an exit status
 	}
-	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(config.DefaultPaths), initCmd())
-	root.AddCommand(sessionCmds(realDeps())...)
+	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(d.paths), initCmd())
+	root.AddCommand(sessionCmds(d)...)
 	root.PersistentFlags().String("sid", "", "target this session instead of the last attached one")
 	return root
 }

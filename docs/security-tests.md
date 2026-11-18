@@ -70,6 +70,9 @@ line exists, its mutation in the same change.
 | 1.8 | With a real terminal (a pty): raw mode (no local echo), bracketed paste enabled on the real terminal, the hello carries its size, window-size changes are forwarded, and on exit the terminal is restored exactly (termios) and left usable (alternate screen, mouse, cursor, colours reset) | Decision 4 (relay) | `relay.TestRealTerminalRawModePasteModeSizeAndRestore`, `pty.TestRawModeAndRestore`, `pty.TestSizeRoundTrip` | M41, M42, M44 | fast |
 | 1.8 | End to end through the real binary on a real pty: `start` on a terminal attaches and the shell runs inside the sandbox (cwd, a real tty, the terminal's size); the agent's OSC 52 never reaches the terminal; leader then d detaches with status 0 and the session lists as detached; `attach` with no argument uses the last attached session and finds the shell state intact; `status` says attached; the agent's exit status propagates and the session goes idle; the next attach restarts the agent; an alternate-screen agent is restored on reattach and left cleanly on detach | Spec: Daemon-hosted sessions; Detach and attach; List sessions; Session targeting | `cli.TestStartAttachDetachReattachExit`, `cli.TestAlternateScreenAndTerminalRestoreAcrossDetach` | M47 to M50 | security |
 | 1.3 | `exec` on a terminal runs in the same sandbox, propagates the exit status, needs a target (the error lists the sessions), does not start the agent, and the process dies when its client's terminal goes away; `attach` and `exec` refuse to run without a terminal | Spec: Exec in a running sandbox; Session targeting | `cli.TestExecOnATerminal`, `cli.TestAttachAndExecNeedATerminal` | M49, M51 | security |
+| 1.8 | The leader prompt: on a normal screen it is an overlay on the alternate screen (closing it restores the agent's screen exactly, no repaint); over an alternate-screen app it overwrites the bottom row between a saved and restored cursor and asks the app to repaint, restoring a hidden cursor; agent output is held while it is open and shown after; what is typed in it never reaches the agent; Escape dismisses without running anything; a command's text is shown with control characters removed so it cannot inject escape sequences; with no prompt callback the key typed after the leader goes to the agent | Spec: In-session command prompt | `relay.TestPromptOnANormalScreenIsAnOverlayThatRestoresTheScreen`, `TestPromptOverAnAlternateScreenAppRepaintsIt`, `TestEscapeDismissesAndTypingGoesBackToTheAgent`, `TestPromptResultCannotInjectEscapeSequences`, `TestWithoutAPromptCallbackTheLeaderColonDoesNothing`, `TestDisplayText`, `TestEditor` | M52 to M56, M58, M59 | fast |
+| 1.8 | Prompt commands run in this process with the session you are attached to as the target, with shell-style quoting; commands that attach, start another session or are internal are refused; errors and bad lines are reported as text | Spec: In-session command prompt | `cli.TestPromptRunnerTargetsTheCurrentSessionAndRefusesAttaching`, `cli.TestTokenize` | M57 | fast |
+| 1.8 | End to end on a real pty: `leader :` opens the overlay, `status` shows this very session's status on one row, the prompt closes by itself, `attach` is refused, a dismissed `:stop` leaves the session running and the agent usable, and `:stop` really ends the session you are in | Spec: In-session command prompt | `cli.TestLeaderPromptInASession` | M57 | security |
 
 ## Host-assumption canaries
 
@@ -86,7 +89,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(51 of 51) on 2026-11-17.
+(59 of 59) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -141,6 +144,14 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M49 | An exec'd process's exit status is not propagated | `cli.TestExecOnATerminal` |
 | M50 | `start` on a terminal does not attach | `cli.TestStartAttachDetachReattachExit` |
 | M51 | `attach` and `exec` run without a terminal | `cli.TestAttachAndExecNeedATerminal` |
+| M52 | Agent output is not held while the prompt is open | `relay.TestPromptOnANormalScreenIsAnOverlayThatRestoresTheScreen` |
+| M53 | The prompt never uses the alternate-screen overlay | same |
+| M54 | No repaint after the prompt overwrote an alternate-screen app's bottom row | `relay.TestPromptOverAnAlternateScreenAppRepaintsIt` |
+| M55 | A command's output is shown with its control characters | `relay.TestPromptResultCannotInjectEscapeSequences` |
+| M56 | Escape does not dismiss the prompt | `relay.TestEditor` |
+| M57 | The prompt accepts `attach`, `start`, `exec` | `cli.TestPromptRunnerTargetsTheCurrentSessionAndRefusesAttaching` |
+| M58 | A hidden cursor is not restored after the prompt | `relay.TestPromptOverAnAlternateScreenAppRepaintsIt` |
+| M59 | The key typed after the leader is swallowed when no prompt exists | `relay.TestWithoutAPromptCallbackTheLeaderColonDoesNothing` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not

@@ -57,9 +57,7 @@ func fakeSession(t *testing.T, base, workdir string) string {
 
 func run(t *testing.T, d deps, args ...string) (string, error) {
 	t.Helper()
-	root := Root()
-	root.ResetCommands()
-	root.AddCommand(sessionCmds(d)...)
+	root := rootWith(d)
 	var out, errb bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&errb)
@@ -145,5 +143,57 @@ func TestStartRequiresAnAgent(t *testing.T) {
 	d, _ := testDeps(t)
 	if _, err := run(t, d, "start"); err == nil {
 		t.Error("start without an agent command accepted")
+	}
+}
+
+func TestTokenize(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    []string
+		wantErr bool
+	}{
+		{"status", []string{"status"}, false},
+		{"  mount   ~/x  --ro ", []string{"mount", "~/x", "--ro"}, false},
+		{`mount "my dir/x" --as 'a b'`, []string{"mount", "my dir/x", "--as", "a b"}, false},
+		{`a\ b c`, []string{"a b", "c"}, false},
+		{`say "he said \"hi\""`, []string{"say", `he said "hi"`}, false},
+		{`''`, []string{""}, false},
+		{"", nil, false},
+		{`mount "oops`, nil, true},
+		{`mount 'oops`, nil, true},
+		{`trailing\`, nil, true},
+	}
+	for _, tc := range tests {
+		got, err := tokenize(tc.in)
+		if (err != nil) != tc.wantErr || strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+			t.Errorf("tokenize(%q) = %q, %v; want %q (err %v)", tc.in, got, err, tc.want, tc.wantErr)
+		}
+	}
+}
+
+func TestPromptRunnerTargetsTheCurrentSessionAndRefusesAttaching(t *testing.T) {
+	d, base := testDeps(t)
+	id := fakeSession(t, base, "/work/p")
+	run := promptRunner(d, id)
+
+	if out := run("status"); !strings.Contains(out, id) || !strings.Contains(out, "idle") {
+		t.Errorf("status without --sid must target the current session: %q", out)
+	}
+	if out := run("isolait list"); !strings.Contains(out, id) {
+		t.Errorf("list: %q", out)
+	}
+	for _, cmd := range []string{"start sh", "attach", "exec -- sh", "daemon", "init", "preflight"} {
+		if out := run(cmd); !strings.Contains(out, "not available in the prompt") {
+			t.Errorf("%q must be refused in the prompt: %q", cmd, out)
+		}
+	}
+	if out := run("nonsense"); !strings.Contains(out, "unknown command") {
+		t.Errorf("an unknown command: %q", out)
+	}
+	if out := run(`status "unterminated`); !strings.Contains(out, "unterminated quote") {
+		t.Errorf("a bad line: %q", out)
+	}
+	if out := run("   "); out != "" {
+		t.Errorf("an empty line: %q", out)
 	}
 }

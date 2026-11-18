@@ -65,7 +65,7 @@ func attachTo(cmd *cobra.Command, d deps, base, id string, hello attach.HelloMsg
 	if hello.Mode == attach.ModeAgent {
 		daemon.SetLast(base, id)
 	}
-	res, err := relay.Run(relay.Options{Conn: conn, Hello: hello, Leader: leader, In: in, Out: out, TTY: out})
+	res, err := relay.Run(relay.Options{Conn: conn, Hello: hello, Leader: leader, In: in, Out: out, TTY: out, Prompt: promptRunner(d, id)})
 	if err != nil {
 		return err
 	}

@@ -130,6 +130,22 @@ M = [
      "./internal/cli", "TestStartAttachDetachReattachExit", True, 120),
     ("M51", "internal/cli/attach.go", "if !ok1 || !ok2 || !pty.IsTerminal(int(in.Fd())) || !pty.IsTerminal(int(out.Fd())) {", "if !ok1 || !ok2 || (!pty.IsTerminal(int(in.Fd())) && false) || (!pty.IsTerminal(int(out.Fd())) && false) {",
      "./internal/cli", "TestAttachAndExecNeedATerminal", True, 120),
+    ("M52", "internal/relay/relay.go", "if s.prompt.open {\n\t\t\t\ts.holdLocked(clean)", "if false {\n\t\t\t\ts.holdLocked(clean)",
+     "./internal/relay", "TestPromptOnANormalScreenIsAnOverlayThatRestoresTheScreen", False, 90),
+    ("M53", "internal/relay/prompt.go", "overlay: !s.san.Modes().AltScreen}", "overlay: false}",
+     "./internal/relay", "TestPromptOnANormalScreenIsAnOverlayThatRestoresTheScreen", False, 90),
+    ("M54", "internal/relay/prompt.go", "if !s.prompt.overlay || s.prompt.dropped {", "if s.prompt.dropped {",
+     "./internal/relay", "TestPromptOverAnAlternateScreenAppRepaintsIt", False, 90),
+    ("M55", "internal/relay/prompt.go", "if unicode.IsControl(r) {\n\t\t\t\tcontinue\n\t\t\t}", "if false && unicode.IsControl(r) {\n\t\t\t\tcontinue\n\t\t\t}",
+     "./internal/relay", "TestPromptResultCannotInjectEscapeSequences|TestDisplayText", False, 90),
+    ("M56", "internal/relay/editor.go", "return actDismiss, changed // a lone Escape", "return actNone, changed // a lone Escape",
+     "./internal/relay", "TestEditor|TestEscapeDismissesAndTypingGoesBackToTheAgent", False, 90),
+    ("M57", "internal/cli/prompt.go", "if notInPrompt[args[0]] {", "if false {",
+     "./internal/cli", "TestPromptRunnerTargetsTheCurrentSessionAndRefusesAttaching", False, 60),
+    ("M58", "internal/relay/prompt.go", "if s.san.Modes().CursorHidden {", "if false {",
+     "./internal/relay", "TestPromptOverAnAlternateScreenAppRepaintsIt", False, 90),
+    ("M59", "internal/relay/prompt.go", "if noPrompt {", "if noPrompt && false {",
+     "./internal/relay", "TestWithoutAPromptCallbackTheLeaderColonDoesNothing", False, 90),
 ]
 
 

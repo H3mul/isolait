@@ -269,3 +269,53 @@ func TestAttachAndExecNeedATerminal(t *testing.T) {
 		}
 	}
 }
+
+// 4.6 end to end: the leader prompt runs isolait commands against the session you are attached to, shows the
+// result without disturbing the agent, and keeps the agent usable afterwards.
+func TestLeaderPromptInASession(t *testing.T) {
+	e := newE2E(t)
+	p := e.onPTY("start", "sh")
+	p.type_("echo r\"\"esult first en\"\"d\r")
+	p.waitFor("result first end")
+
+	p.type_("\x1c:")
+	p.waitFor("\x1b[?1049h") // a normal-screen agent: the prompt is an overlay on the alternate screen
+	p.type_("status\r")
+	p.waitFor("attached") // the status of this very session, on one row
+	if out := p.shown.String(); !strings.Contains(out, "/workspaces/api") {
+		t.Errorf("status output missing: %q", out)
+	}
+	// commands that attach or start are refused in the prompt
+	p.waitFor("\x1b[?1049l") // the prompt closed by itself after showing the result
+	p.type_("\x1c:attach\r")
+	p.waitFor("not available in the prompt")
+	p.waitFor("\x1b[?1049l")
+
+	// Escape dismisses without running anything, and the agent keeps working
+	p.type_("\x1c:stop\x1b")
+	time.Sleep(300 * time.Millisecond)
+	p.type_("echo r\"\"esult second en\"\"d\r")
+	p.waitFor("result second end")
+	if out, _ := e.plain("list"); !strings.Contains(out, "attached") {
+		t.Errorf("a dismissed :stop must leave the session running:\n%s", out)
+	}
+
+	// and the prompt can really act: stop ends the session you are in
+	p.type_("\x1c:stop\r")
+	p.exitCode()
+	eventually(t, "the session to be gone", func() bool {
+		out, _ := e.plain("list")
+		return strings.Contains(out, "no sessions running")
+	})
+}
+
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		if cond() {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}

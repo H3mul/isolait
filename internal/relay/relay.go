@@ -37,6 +37,8 @@ type Options struct {
 	// Prompt runs a command line typed in the leader prompt for the current session and returns the text to
 	// show. Nil disables the prompt (leader then : does nothing).
 	Prompt func(line string) string
+	// ResultHold is how long the prompt's result stays on screen before it closes (default 1.5 s).
+	ResultHold time.Duration
 }
 
 // Result says how the session ended.
@@ -74,8 +76,14 @@ func Run(o Options) (Result, error) {
 	if o.EscapeWait == 0 {
 		o.EscapeWait = 50 * time.Millisecond
 	}
+	if o.ResultHold == 0 {
+		o.ResultHold = 1500 * time.Millisecond
+	}
 
-	s := &state{o: o, conn: conn, filter: term.NewInputFilter(o.Leader), done: make(chan struct{})}
+	s := &state{o: o, conn: conn, filter: term.NewInputFilter(o.Leader), done: make(chan struct{}), cols: h.Cols, rows: h.Rows}
+	if s.cols < 1 || s.rows < 1 {
+		s.cols, s.rows = 80, 24
+	}
 	restore := s.enterTerminal()
 	defer restore()
 
@@ -103,7 +111,10 @@ type state struct {
 	filter *term.InputFilter
 	san    term.Sanitizer
 
-	mu     sync.Mutex // guards filter, san, result, err and timer
+	cols, rows int
+	prompt     promptState
+
+	mu     sync.Mutex // guards filter, san, size, prompt, result, err and timer
 	outMu  sync.Mutex // serialises writes to the terminal
 	result Result
 	err    error
@@ -142,6 +153,7 @@ func (s *state) enterTerminal() func() {
 	s.writeOut([]byte("\x1b[?2004h"))
 	return func() {
 		s.mu.Lock()
+		s.closePromptLocked() // leave the prompt's overlay if the session ended while it was open
 		alt := s.san.Modes().AltScreen
 		s.mu.Unlock()
 		seq := "\x1b[?2004l" // our own paste mode
@@ -167,8 +179,12 @@ func (s *state) readOutput() {
 			s.mu.Lock()
 			clean := append([]byte(nil), s.san.Write(f.Payload)...)
 			s.filter.SetAgentPaste(s.san.Modes().BracketedPaste)
+			if s.prompt.open {
+				s.holdLocked(clean) // the prompt owns the bottom row: show the agent's output once it closes
+			} else {
+				s.writeOut(clean)
+			}
 			s.mu.Unlock()
-			s.writeOut(clean)
 		case attach.Exit:
 			var e attach.ExitInfo
 			json.Unmarshal(f.Payload, &e)
@@ -234,22 +250,14 @@ func (s *state) apply(evs []term.Event) bool {
 	return false
 }
 
-// openPrompt and promptInput are the leader prompt; without a Prompt callback the prompt does nothing.
-func (s *state) openPrompt() {
-	if s.o.Prompt == nil {
-		s.mu.Lock()
-		s.filter.ClosePrompt()
-		s.mu.Unlock()
-	}
-}
-
-func (s *state) promptInput([]byte) {}
-
 func (s *state) followWindow(w <-chan os.Signal) {
 	for {
 		select {
 		case <-w:
 			if cols, rows, err := pty.GetSize(int(s.o.TTY.Fd())); err == nil {
+				s.mu.Lock()
+				s.cols, s.rows = cols, rows
+				s.mu.Unlock()
 				s.conn.Send(attach.Frame{Type: attach.Resize, Payload: attach.ResizePayload(cols, rows)})
 			}
 		case <-s.done:

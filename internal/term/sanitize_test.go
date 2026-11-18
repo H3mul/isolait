@@ -110,6 +110,14 @@ func TestModesAreTracked(t *testing.T) {
 	if !s.Modes().AltScreen {
 		t.Fatal("?47 not tracked")
 	}
+	s.Write([]byte(ESC + "[?25l"))
+	if !s.Modes().CursorHidden {
+		t.Fatal("hidden cursor not tracked")
+	}
+	s.Write([]byte(ESC + "[?1;25h"))
+	if s.Modes().CursorHidden {
+		t.Fatal("shown cursor not tracked")
+	}
 }
 
 func TestOverlongSequencesAreBounded(t *testing.T) {

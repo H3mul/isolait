@@ -9,6 +9,7 @@ package term
 type Modes struct {
 	AltScreen      bool // ?1049, ?1047 or ?47
 	BracketedPaste bool // ?2004: the client keeps the real terminal in this mode itself, see Sanitizer
+	CursorHidden   bool // ?25 reset: the agent hid the cursor
 }
 
 type state int
@@ -203,6 +204,9 @@ func (s *Sanitizer) finishCSI(final byte) {
 			switch string(param) {
 			case "1049", "1047", "47":
 				s.modes.AltScreen = on
+				keep = appendParam(keep, param)
+			case "25":
+				s.modes.CursorHidden = !on
 				keep = appendParam(keep, param)
 			case "2004":
 				s.modes.BracketedPaste = on // consumed: the client owns the real terminal's setting
