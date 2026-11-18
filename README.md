@@ -50,8 +50,9 @@ $ isolait list
 no sessions running
 ```
 
-Run `isolait start <agent> [args...]` in the directory you want the agent to work in. Flags go before the agent
-command:
+Run `isolait start [agent [args...]]` in the directory you want the agent to work in; with no agent it runs `bash`
+(`isolait start -d` then `isolait attach` is the way to prepare mounts and ports before running anything). Flags go
+before the agent command:
 
 | Flag | Effect |
 |---|---|

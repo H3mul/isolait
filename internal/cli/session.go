@@ -27,6 +27,14 @@ type deps struct {
 
 func realDeps() deps { return deps{paths: config.DefaultPaths, runtime: session.RuntimeBase} }
 
+// agentOrShell is the command a session runs: the given one, else bash, to prepare the session from.
+func agentOrShell(args []string) []string {
+	if len(args) == 0 {
+		return []string{"bash"}
+	}
+	return args
+}
+
 func sessionCmds(d deps) []*cobra.Command {
 	return []*cobra.Command{startCmd(d), attachCmd(d), execCmd(d), listCmd(d), statusCmd(d), stopCmd(d), mountCmd(d), unmountCmd(d), allowCmd(d), denyCmd(d), daemonCmd(), spawnCmd()}
 }
@@ -136,10 +144,11 @@ func startCmd(d deps) *cobra.Command {
 	var ro, inheritEnv, inheritPath, allowUserns, detached bool
 	var envNames []string
 	cmd := &cobra.Command{
-		Use:   "start [flags] <agent> [args...]",
+		Use:   "start [flags] [agent [args...]]",
 		Short: "Start a sandboxed session in the current directory",
-		Args:  cobra.MinimumNArgs(1),
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args = agentOrShell(args)
 			wd, err := os.Getwd()
 			if err != nil {
 				return err

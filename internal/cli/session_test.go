@@ -139,10 +139,23 @@ func TestCheckWorkdir(t *testing.T) {
 	}
 }
 
-func TestStartRequiresAnAgent(t *testing.T) {
-	d, _ := testDeps(t)
-	if _, err := run(t, d, "start"); err == nil {
-		t.Error("start without an agent command accepted")
+func TestStartWithoutAnAgentRunsBash(t *testing.T) {
+	if got := agentOrShell(nil); strings.Join(got, " ") != "bash" {
+		t.Errorf("no agent: %q", got)
+	}
+	if got := agentOrShell([]string{"claude", "-p"}); strings.Join(got, " ") != "claude -p" {
+		t.Errorf("an agent is kept as given: %q", got)
+	}
+	// both forms are accepted by the command line: `start` and `start -d`
+	root := rootWith(realDeps())
+	start, _, _ := root.Find([]string{"start"})
+	for _, args := range [][]string{{}, {"-d"}} {
+		if err := start.ParseFlags(args); err != nil {
+			t.Fatal(err)
+		}
+		if err := start.ValidateArgs(start.Flags().Args()); err != nil {
+			t.Errorf("start %v rejected: %v", args, err)
+		}
 	}
 }
 
