@@ -146,6 +146,18 @@ M = [
      "./internal/relay", "TestPromptOverAnAlternateScreenAppRepaintsIt", False, 90),
     ("M59", "internal/relay/prompt.go", "if noPrompt {", "if noPrompt && false {",
      "./internal/relay", "TestWithoutAPromptCallbackTheLeaderColonDoesNothing", False, 90),
+    ("M60", "internal/netd/policy.go", "return p.Check(ap.Addr())\n}", "_ = ap\n\treturn nil\n}",
+     "./internal/netd", "TestControlRefusesAtDialTimeAfterNameResolution", False, 60),
+    ("M61", "internal/netd/policy.go", "a := addr.Unmap() //", "a := addr //",
+     "./internal/netd", "TestPolicyTable", False, 60),
+    ("M62", "internal/netd/policy.go", 'netip.MustParsePrefix("100.64.0.0/10"), "carrier-grade NAT"', 'netip.MustParsePrefix("100.64.0.0/11"), "carrier-grade NAT"',
+     "./internal/netd", "TestPolicyTable|TestPolicyAgreesWithAReferenceOnRandomAddresses", False, 60),
+    ("M63", "internal/netd/policy.go", "if p.host[a] {", "if false && p.host[a] {",
+     "./internal/netd", "TestPolicyTable", False, 60),
+    ("M64", "internal/netd/policy.go", 'netip.MustParsePrefix("169.254.169.254/32")', 'netip.MustParsePrefix("169.254.169.253/32")',
+     "./internal/netd", "TestPolicyTable", False, 60),
+    ("M65", "internal/netd/policy.go", "if !a.Is4() {", "if false {",
+     "./internal/netd", "TestPolicyTable", False, 60),
 ]
 
 

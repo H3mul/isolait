@@ -73,6 +73,8 @@ line exists, its mutation in the same change.
 | 1.8 | The leader prompt: on a normal screen it is an overlay on the alternate screen (closing it restores the agent's screen exactly, no repaint); over an alternate-screen app it overwrites the bottom row between a saved and restored cursor and asks the app to repaint, restoring a hidden cursor; agent output is held while it is open and shown after; what is typed in it never reaches the agent; Escape dismisses without running anything; a command's text is shown with control characters removed so it cannot inject escape sequences; with no prompt callback the key typed after the leader goes to the agent | Spec: In-session command prompt | `relay.TestPromptOnANormalScreenIsAnOverlayThatRestoresTheScreen`, `TestPromptOverAnAlternateScreenAppRepaintsIt`, `TestEscapeDismissesAndTypingGoesBackToTheAgent`, `TestPromptResultCannotInjectEscapeSequences`, `TestWithoutAPromptCallbackTheLeaderColonDoesNothing`, `TestDisplayText`, `TestEditor` | M52 to M56, M58, M59 | fast |
 | 1.8 | Prompt commands run in this process with the session you are attached to as the target, with shell-style quoting; commands that attach, start another session or are internal are refused; errors and bad lines are reported as text | Spec: In-session command prompt | `cli.TestPromptRunnerTargetsTheCurrentSessionAndRefusesAttaching`, `cli.TestTokenize` | M57 | fast |
 | 1.8 | End to end on a real pty: `leader :` opens the overlay, `status` shows this very session's status on one row, the prompt closes by itself, `attach` is refused, a dismissed `:stop` leaves the session running and the agent usable, and `:stop` really ends the session you are in | Spec: In-session command prompt | `cli.TestLeaderPromptInASession` | M57 | security |
+| 1.6 | The destination policy refuses loopback, RFC 1918, carrier-grade NAT, link-local, multicast, cloud-metadata space (named as such), unspecified and reserved ranges, documentation and benchmarking ranges, the host's own addresses and the gateway, and all IPv6; an IPv4-mapped IPv6 address is judged as the IPv4 address; allowed addresses next to each blocked range stay allowed; 200,000 random addresses agree with an independent reference | Decision 5 (dial-time policy) | `netd.TestPolicyTable`, `TestPolicyAgreesWithAReferenceOnRandomAddresses`, `TestBlockedErrorNamesTheAddress` | M61 to M65 | fast |
+| 1.6 | The policy also runs at dial time on the socket address actually connected, after name resolution (DNS rebinding: `localhost` resolves to loopback and is refused before any packet is sent); an unparsable address fails closed | Decision 5 | `netd.TestControlRefusesAtDialTimeAfterNameResolution`, `TestControlFailsClosedOnAnUnparsableAddress` | M60 | fast |
 
 ## Host-assumption canaries
 
@@ -89,7 +91,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(59 of 59) on 2026-11-17.
+(65 of 65) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -152,6 +154,12 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M57 | The prompt accepts `attach`, `start`, `exec` | `cli.TestPromptRunnerTargetsTheCurrentSessionAndRefusesAttaching` |
 | M58 | A hidden cursor is not restored after the prompt | `relay.TestPromptOverAnAlternateScreenAppRepaintsIt` |
 | M59 | The key typed after the leader is swallowed when no prompt exists | `relay.TestWithoutAPromptCallbackTheLeaderColonDoesNothing` |
+| M60 | The dial-time policy hook allows everything | `netd.TestControlRefusesAtDialTimeAfterNameResolution` |
+| M61 | IPv4-mapped IPv6 addresses are not judged as IPv4 | `netd.TestPolicyTable` |
+| M62 | The carrier-grade NAT range is cut short | `netd.TestPolicyTable`, `TestPolicyAgreesWithAReferenceOnRandomAddresses` |
+| M63 | The host's own addresses are allowed | `netd.TestPolicyTable` |
+| M64 | The metadata address is no longer named as such | `netd.TestPolicyTable` |
+| M65 | IPv6 destinations are allowed | `netd.TestPolicyTable` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not
@@ -162,7 +170,7 @@ credential read, and the 0700 runtime directory is the primary defence).
 
 | Spike | Assumption | Design decision | Lands with | Guard test (planned) |
 |---|---|---|---|---|
-| 1.6 | The user-space netstack forwards TCP and answers DNS at the measured rate; the destination policy is checked on the address actually dialed, so a name that resolves to a private address, loopback, link-local or metadata range is refused (DNS rebinding); a refused upstream is a refused guest connect | Decision 5 | 5.1 to 5.5 | `netd` tests plus a security test per blocked range; mutation: skip the dial-time check |
+| 1.6 | The user-space netstack forwards TCP and answers DNS; a refused upstream is a refused guest connect (the policy half is done, see the matrix) | Decision 5 | 5.3, 5.4 | `netd` engine tests; mutation: complete the handshake before dialing |
 | 1.6 | Non-DNS UDP, ICMP and IPv6 from the sandbox are dropped; the sandbox sees only the managed interface | Decision 5 | 5.2, 5.4 | security test; mutation: leave IPv6 enabled |
 | 1.7 | A port grant is a listener on the sandbox loopback forwarded to host `127.0.0.1`; reachable only after `allow`, refused after `deny`, other host services unreachable | Decision 5 | 7.1 to 7.3 | security test; mutation: listen before the grant |
 | 1.8 | A real Claude Code and OpenCode through the relay | Decision 4 | manual, `docs/manual-checks.md` | n/a |
