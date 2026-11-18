@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 )
 
 var (
@@ -145,4 +146,28 @@ func Remove(base, id string) error {
 		return fmt.Errorf("invalid session id %q", id)
 	}
 	return os.RemoveAll(Dir(base, id))
+}
+
+// Touch records that the user just used the session (attach or detach): the modification time of its
+// `used` file is the recency that decides which session a command without --sid acts on.
+func Touch(base, id string) error {
+	p := filepath.Join(Dir(base, id), "used")
+	now := time.Now()
+	if err := os.Chtimes(p, now, now); err == nil {
+		return nil
+	}
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// Used is when the session was last used; ok is false when it never was (callers fall back to its start).
+func Used(base, id string) (t time.Time, ok bool) {
+	fi, err := os.Stat(filepath.Join(Dir(base, id), "used"))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return fi.ModTime(), true
 }

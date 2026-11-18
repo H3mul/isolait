@@ -161,6 +161,7 @@ func Run(spec Spec) error {
 
 	argv := append([]string{bins.AgentPath}, spec.Agent[1:]...)
 	tm := newTerminals(cl, argv, env, dst)
+	tm.onUse = func() { session.Touch(spec.RuntimeBase, spec.ID) }
 	defer tm.Close()
 	attachSrv, err := tm.Listen(session.AttachPath(spec.RuntimeBase, spec.ID))
 	if err != nil {

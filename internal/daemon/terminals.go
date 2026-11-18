@@ -30,6 +30,8 @@ type terminals struct {
 	env  []string // the sandbox environment; TERM is added per client
 	cwd  string
 
+	onUse func() // the user attached or detached (not exec): the session was just used
+
 	mu       sync.Mutex
 	agent    *proc
 	attached *client
@@ -306,6 +308,7 @@ func (t *terminals) serveAgent(c *client, h attach.HelloMsg) {
 	t.attached = c
 	a := t.agent
 	t.mu.Unlock()
+	t.used()
 
 	restarted := false
 	if a == nil {
@@ -344,6 +347,13 @@ func (t *terminals) serveAgent(c *client, h attach.HelloMsg) {
 		t.attached = nil
 	}
 	t.mu.Unlock()
+	t.used()
+}
+
+func (t *terminals) used() {
+	if t.onUse != nil {
+		t.onUse()
+	}
 }
 
 func (t *terminals) serveExec(c *client, h attach.HelloMsg) {

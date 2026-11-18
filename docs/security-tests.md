@@ -161,7 +161,9 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M44 | Window-size changes are not forwarded | `relay.TestRealTerminalRawModePasteModeSizeAndRestore` |
 | M45 | A held lone Escape is never released | `relay.TestLoneEscapeReachesTheAgent` |
 | M46 | Detach is not sent to the daemon | `relay.TestLeaderDetaches` |
-| M47 | The last attached session is not recorded | `cli.TestStartAttachDetachReattachExit` |
+| M47 | Attach is not recorded as use (the session's recency is not updated) | `daemon.TestAttachAndDetachRecordUseButExecDoesNot` |
+| M104 | Sessions are not ordered by recency (targeting and `list` ignore it) | `daemon.TestResolveTargetFollowsTmuxSequence`, `daemon.TestListOrdersByRecency` |
+| M105 | `attach` does not prefer an unattached session | `daemon.TestAttachPrefersTheNewestUnattachedSession` |
 | M48 | The agent's exit status is not propagated | same |
 | M49 | An exec'd process's exit status is not propagated | `cli.TestExecOnATerminal` |
 | M50 | `start` on a terminal does not attach | `cli.TestStartAttachDetachReattachExit` |

@@ -51,7 +51,7 @@ func rootWith(d deps) *cobra.Command {
 	}
 	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(d.paths), initCmd(), netdCmd())
 	root.AddCommand(sessionCmds(d)...)
-	root.PersistentFlags().String("sid", "", "target this session instead of the last attached one")
+	root.PersistentFlags().String("sid", "", "target this session instead of the most recently used one")
 	return root
 }
 

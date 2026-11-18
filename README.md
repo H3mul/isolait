@@ -69,7 +69,9 @@ state or runtime directory.
 ### Targeting a session
 
 `attach`, `exec`, `list`, `status` and `stop` take a session id (`isolait stop <sid>`), or `--sid <sid>`. Without
-either, the command acts on the last attached session; if there is none, it fails and lists the running sessions.
+either, the command acts on the most recently used session (like tmux: attaching or detaching counts, an `exec` does not);
+`attach` prefers the most recently used session that nobody is attached to. `isolait list` shows the most recently used
+first. With no session running the commands say `no sessions running`.
 
 ## Attach, detach and exec
 
@@ -78,7 +80,7 @@ belong to a background daemon, so they survive the terminal:
 
 - **Detach** with the leader key then `d` (default leader: `Ctrl-\`). The agent keeps running and your shell is
   back, with the terminal restored. If you close the terminal instead, the session simply carries on.
-- **`isolait attach [sid]`** attaches again, to the last attached session unless you name one. It shows the agent's
+- **`isolait attach [sid]`** attaches again, to the most recently used session unless you name one. It shows the agent's
   current screen at your current size: the agent is asked to repaint, and an agent that was on the alternate
   screen is put back there. If the agent had exited, attaching starts it again in the same sandbox. One client is
   attached to the agent at a time.

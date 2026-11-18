@@ -39,8 +39,12 @@ func sessionCmds(d deps) []*cobra.Command {
 	return []*cobra.Command{startCmd(d), attachCmd(d), execCmd(d), listCmd(d), statusCmd(d), stopCmd(d), mountCmd(d), unmountCmd(d), allowCmd(d), denyCmd(d), daemonCmd(), spawnCmd()}
 }
 
-// target resolves the session a command acts on: a positional id, else --sid, else the last attached.
+// target resolves the session a command acts on: a positional id, else --sid, else the most recently used.
 func target(cmd *cobra.Command, d deps, args []string) (base, id string, err error) {
+	return resolve(cmd, d, args, false)
+}
+
+func resolve(cmd *cobra.Command, d deps, args []string, forAttach bool) (base, id string, err error) {
 	if base, err = d.runtime(); err != nil {
 		return "", "", err
 	}
@@ -48,7 +52,7 @@ func target(cmd *cobra.Command, d deps, args []string) (base, id string, err err
 	if len(args) > 0 {
 		sid = args[0]
 	}
-	id, err = daemon.ResolveTarget(base, sid)
+	id, err = daemon.ResolveTarget(base, sid, forAttach)
 	return base, id, err
 }
 

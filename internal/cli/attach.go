@@ -8,7 +8,6 @@ import (
 
 	"github.com/H3mul/isolait/internal/attach"
 	"github.com/H3mul/isolait/internal/config"
-	"github.com/H3mul/isolait/internal/daemon"
 	"github.com/H3mul/isolait/internal/pty"
 	"github.com/H3mul/isolait/internal/relay"
 	"github.com/H3mul/isolait/internal/session"
@@ -46,8 +45,7 @@ func leaderKey(d deps) (byte, error) {
 	return term.ParseLeader(res.Config.Leader)
 }
 
-// attachTo connects the terminal to a session and returns when the process ends or the user detaches. Mode agent
-// records the session as the last attached one.
+// attachTo connects the terminal to a session and returns when the process ends or the user detaches.
 func attachTo(cmd *cobra.Command, d deps, base, id string, hello attach.HelloMsg) error {
 	in, out, err := terminalFiles(cmd)
 	if err != nil {
@@ -62,9 +60,6 @@ func attachTo(cmd *cobra.Command, d deps, base, id string, hello attach.HelloMsg
 		return fmt.Errorf("session %s is not reachable: %w", id, err)
 	}
 	defer conn.Close()
-	if hello.Mode == attach.ModeAgent {
-		daemon.SetLast(base, id)
-	}
 	res, err := relay.Run(relay.Options{Conn: conn, Hello: hello, Leader: leader, In: in, Out: out, TTY: out, Prompt: promptRunner(d, id)})
 	if err != nil {
 		return err
@@ -102,7 +97,7 @@ func attachCmd(d deps) *cobra.Command {
 		Short: "Attach this terminal to a session's agent (starts the agent if it is not running)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			base, id, err := target(cmd, d, args)
+			base, id, err := resolve(cmd, d, args, true)
 			if err != nil {
 				return err
 			}

@@ -339,3 +339,25 @@ func TestTermIsSanitizedAndSizeClamped(t *testing.T) {
 	c.mustSee("term=xterm-256color") // an unsafe value is replaced, never passed on
 	c.mustSee("24 80")               // out-of-range sizes fall back to defaults
 }
+
+// 3.1: attach and detach record use; an exec does not.
+func TestAttachAndDetachRecordUseButExecDoesNot(t *testing.T) {
+	tm := newTerms(t, `printf ready; while true; do sleep 0.1; done`)
+	var mu sync.Mutex
+	uses := 0
+	tm.onUse = func() { mu.Lock(); uses++; mu.Unlock() }
+	count := func() int { mu.Lock(); defer mu.Unlock(); return uses }
+
+	e := dial(t, tm, attach.HelloMsg{Mode: attach.ModeExec, Argv: []string{"true"}, Term: "xterm", Cols: 80, Rows: 24})
+	e.waitExit()
+	if count() != 0 {
+		t.Errorf("an exec counted as use: %d", count())
+	}
+	c := dial(t, tm, agentHello())
+	c.mustSee("ready")
+	if count() != 1 {
+		t.Errorf("attach: %d uses, want 1", count())
+	}
+	c.conn.Send(attach.Frame{Type: attach.Detach})
+	eventually(t, "detach recorded", func() bool { return count() == 2 })
+}

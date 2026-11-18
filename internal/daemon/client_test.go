@@ -54,36 +54,112 @@ func fakeDaemon(t *testing.T, base string, st Status) string {
 
 func TestResolveTarget(t *testing.T) {
 	base := shortBase(t)
-	if _, err := ResolveTarget(base, ""); err == nil || !strings.Contains(err.Error(), "no session targeted") || !strings.Contains(err.Error(), "no sessions are running") {
+	if _, err := ResolveTarget(base, "", false); err == nil || !strings.Contains(err.Error(), "no sessions running") {
 		t.Fatalf("nothing running: %v", err)
 	}
-	a := fakeDaemon(t, base, Status{ID: "alpha", State: "idle", Started: time.Now(), Mounts: []MountInfo{{Path: "/workspaces/alpha", Mode: "rw"}}})
-	b := fakeDaemon(t, base, Status{ID: "beta", State: "idle", Started: time.Now()})
+	a := fakeDaemon(t, base, Status{ID: "alpha", State: "detached", Started: time.Now().Add(-2 * time.Minute)})
+	b := fakeDaemon(t, base, Status{ID: "beta", State: "detached", Started: time.Now().Add(-time.Minute)})
 
-	if got, err := ResolveTarget(base, b); err != nil || got != b {
+	if got, err := ResolveTarget(base, b, false); err != nil || got != b {
 		t.Fatalf("explicit sid: %q %v", got, err)
 	}
-	if _, err := ResolveTarget(base, "nope-0000"); err == nil || !strings.Contains(err.Error(), "does not exist") || !strings.Contains(err.Error(), a) {
+	if _, err := ResolveTarget(base, "nope-0000", false); err == nil || !strings.Contains(err.Error(), "does not exist") || !strings.Contains(err.Error(), a) {
 		t.Fatalf("missing sid must fail listing the running sessions: %v", err)
 	}
-	if _, err := ResolveTarget(base, "../etc"); err == nil || !strings.Contains(err.Error(), "invalid session id") {
+	if _, err := ResolveTarget(base, "../etc", false); err == nil || !strings.Contains(err.Error(), "invalid session id") {
 		t.Fatalf("path-like sid: %v", err)
 	}
-	if _, err := ResolveTarget(base, ""); err == nil || !strings.Contains(err.Error(), a) || !strings.Contains(err.Error(), b) {
-		t.Fatalf("no target with sessions running must list them: %v", err)
+	if got, _ := ResolveTarget(base, "", false); got != b { // never used: the newer start wins
+		t.Errorf("by start time: %q want %s", got, b)
 	}
-	if err := SetLast(base, a); err != nil {
+	used := func(id string, ago time.Duration) {
+		if err := session.Touch(base, id); err != nil {
+			t.Fatal(err)
+		}
+		when := time.Now().Add(-ago)
+		os.Chtimes(filepath.Join(session.Dir(base, id), "used"), when, when)
+	}
+	used(a, time.Second) // a was used after b started
+	if got, _ := ResolveTarget(base, "", false); got != a {
+		t.Errorf("most recently used: %q want %s", got, a)
+	}
+	if got, _ := ResolveTarget(base, b, false); got != b {
+		t.Error("--sid must beat recency")
+	}
+	session.Remove(base, a) // the most recent session disappears: the next one is chosen, never an error
+	if got, err := ResolveTarget(base, "", false); err != nil || got != b {
+		t.Fatalf("fall back to the next session: %q %v", got, err)
+	}
+}
+
+// The tmux experiment of the design: s1, s2, s3 in order; after s3 is gone the next target is s2.
+func TestResolveTargetFollowsTmuxSequence(t *testing.T) {
+	base := shortBase(t)
+	now := time.Now()
+	s1 := fakeDaemon(t, base, Status{ID: "s1", State: "detached", Started: now.Add(-3 * time.Minute)})
+	s2 := fakeDaemon(t, base, Status{ID: "s2", State: "detached", Started: now.Add(-2 * time.Minute)})
+	s3 := fakeDaemon(t, base, Status{ID: "s3", State: "detached", Started: now.Add(-1 * time.Minute)})
+	for i, want := range []string{s3, s2, s1} {
+		if got, err := ResolveTarget(base, "", false); err != nil || got != want {
+			t.Fatalf("step %d: %q %v, want %s", i, got, err, want)
+		}
+		session.Remove(base, want)
+	}
+	if _, err := ResolveTarget(base, "", false); err == nil || !strings.Contains(err.Error(), "no sessions running") {
+		t.Fatalf("after the last: %v", err)
+	}
+}
+
+func TestAttachPrefersTheNewestUnattachedSession(t *testing.T) {
+	base := shortBase(t)
+	now := time.Now()
+	old := fakeDaemon(t, base, Status{ID: "old", State: "detached", Started: now.Add(-2 * time.Minute)})
+	busy := fakeDaemon(t, base, Status{ID: "busy", State: "attached", Started: now.Add(-1 * time.Minute)})
+	if got, _ := ResolveTarget(base, "", true); got != old {
+		t.Errorf("attach: %q, want the unattached %s", got, old)
+	}
+	if got, _ := ResolveTarget(base, "", false); got != busy {
+		t.Errorf("other commands: %q, want the newest %s", got, busy)
+	}
+	session.Remove(base, old)
+	if got, _ := ResolveTarget(base, "", true); got != busy { // nothing unattached: the newest, like tmux
+		t.Errorf("attach with all attached: %q, want %s", got, busy)
+	}
+}
+
+func TestStaleSessionsAreNeverChosen(t *testing.T) {
+	base := shortBase(t)
+	live := fakeDaemon(t, base, Status{ID: "live", State: "detached", Started: time.Now().Add(-time.Hour)})
+	dead, _ := session.Create(base, "/x/dead") // newer, but its daemon is gone
+	gone := exec.Command("/bin/true")
+	gone.Run()
+	os.WriteFile(filepath.Join(session.Dir(base, dead), "pid"), []byte(strconv.Itoa(gone.Process.Pid)+"\n"), 0o600)
+	if got, err := ResolveTarget(base, "", false); err != nil || got != live {
+		t.Fatalf("%q %v, want %s", got, err, live)
+	}
+	if _, err := os.Stat(session.Dir(base, dead)); !os.IsNotExist(err) {
+		t.Error("the stale directory was not swept")
+	}
+}
+
+// 3.3: list shows the most recently used first.
+func TestListOrdersByRecency(t *testing.T) {
+	base := shortBase(t)
+	now := time.Now()
+	a := fakeDaemon(t, base, Status{ID: "a", State: "detached", Started: now.Add(-3 * time.Minute)})
+	b := fakeDaemon(t, base, Status{ID: "b", State: "detached", Started: now.Add(-2 * time.Minute)})
+	c := fakeDaemon(t, base, Status{ID: "c", State: "detached", Started: now.Add(-1 * time.Minute)})
+	session.Touch(base, a) // a is now the most recently used
+	es, err := List(base)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := ResolveTarget(base, ""); err != nil || got != a {
-		t.Fatalf("last attached: %q %v", got, err)
+	var got []string
+	for _, e := range es {
+		got = append(got, e.ID)
 	}
-	if got, _ := ResolveTarget(base, b); got != b {
-		t.Error("--sid must beat the last attached session")
-	}
-	session.Remove(base, a) // the last attached session disappears
-	if _, err := ResolveTarget(base, ""); err == nil || !strings.Contains(err.Error(), "the last attached session is gone") || !strings.Contains(err.Error(), b) {
-		t.Fatalf("stale last pointer: %v", err)
+	if strings.Join(got, ",") != strings.Join([]string{a, c, b}, ",") {
+		t.Errorf("order %v, want %v", got, []string{a, c, b})
 	}
 }
 

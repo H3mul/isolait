@@ -89,14 +89,8 @@ func TestListStatusStop(t *testing.T) {
 			}
 		}
 	}
-	if _, err = run(t, d, "status"); err == nil || !strings.Contains(err.Error(), "no session targeted") || !strings.Contains(err.Error(), id) {
-		t.Errorf("no target: %v", err)
-	}
-	if err := daemon.SetLast(base, id); err != nil {
-		t.Fatal(err)
-	}
 	if out, err = run(t, d, "status"); err != nil || !strings.Contains(out, id) {
-		t.Errorf("last attached should be the default target: %v %q", err, out)
+		t.Errorf("the only session is the default target: %v %q", err, out)
 	}
 	if out, err = run(t, d, "stop", id); err != nil || !strings.Contains(out, "stopped "+id) {
 		t.Errorf("stop: %v %q", err, out)

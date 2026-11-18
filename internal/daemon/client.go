@@ -207,9 +207,11 @@ type Entry struct {
 	ID     string
 	Status *Status
 	Err    error
+	Used   time.Time // when the user last attached or detached; the start time if never
 }
 
-// List returns the sessions with a runtime directory. Leftovers of dead daemons are removed and not listed.
+// List returns the sessions with a runtime directory, most recently used first. Leftovers of dead daemons
+// are removed and not listed.
 func List(base string) ([]Entry, error) {
 	ids, err := session.List(base)
 	if err != nil {
@@ -226,8 +228,13 @@ func List(base string) ([]Entry, error) {
 			out = append(out, Entry{ID: id, Err: err}) // starting up, or not answering
 			continue
 		}
-		out = append(out, Entry{ID: id, Status: &st})
+		used, ok := session.Used(base, id)
+		if !ok {
+			used = st.Started
+		}
+		out = append(out, Entry{ID: id, Status: &st, Used: used})
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Used.After(out[j].Used) })
 	return out, nil
 }
 
@@ -278,14 +285,11 @@ func Stop(base, id string) error {
 
 var errNoSuchSession = errors.New("no such session")
 
-// SetLast records the last attached session, the default target of commands without --sid.
-func SetLast(base, id string) error {
-	return os.WriteFile(filepath.Join(base, "last"), []byte(id+"\n"), 0o600)
-}
-
-// ResolveTarget picks the session a command acts on: --sid, else the last attached one. When neither
-// exists it fails with the list of running sessions.
-func ResolveTarget(base, sid string) (string, error) {
+// ResolveTarget picks the session a command acts on, like tmux: --sid, else the most recently used live
+// session (attach and detach count; the start time stands in for a session never used). With forAttach it
+// prefers the most recently used session nobody is attached to. List sweeps stale sessions first, so a dead
+// one is never chosen.
+func ResolveTarget(base, sid string, forAttach bool) (string, error) {
 	if sid != "" {
 		if !session.ValidID(sid) {
 			return "", fmt.Errorf("invalid session id %q", sid)
@@ -295,16 +299,26 @@ func ResolveTarget(base, sid string) (string, error) {
 		}
 		return sid, nil
 	}
-	if b, err := os.ReadFile(filepath.Join(base, "last")); err == nil {
-		last := strings.TrimSpace(string(b))
-		if session.ValidID(last) {
-			if _, err := os.Stat(session.Dir(base, last)); err == nil {
-				return last, nil
-			}
+	es, _ := List(base) // newest used first
+	var first, unattached string
+	for _, e := range es {
+		if e.Status == nil {
+			continue // still starting, or not answering
 		}
-		return "", noTarget(base, "the last attached session is gone")
+		if first == "" {
+			first = e.ID
+		}
+		if unattached == "" && e.Status.State != "attached" {
+			unattached = e.ID
+		}
 	}
-	return "", noTarget(base, "no session targeted: attach to one or pass --sid")
+	switch {
+	case forAttach && unattached != "":
+		return unattached, nil
+	case first != "":
+		return first, nil
+	}
+	return "", errors.New("no sessions running")
 }
 
 func noTarget(base, why string) error {
