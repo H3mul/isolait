@@ -49,7 +49,7 @@ func rootWith(d deps) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true, // main prints errors, except an ExitError, which is only an exit status
 	}
-	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(d.paths), initCmd())
+	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(d.paths), initCmd(), netdCmd())
 	root.AddCommand(sessionCmds(d)...)
 	root.PersistentFlags().String("sid", "", "target this session instead of the last attached one")
 	return root

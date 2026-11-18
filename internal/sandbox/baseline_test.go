@@ -137,6 +137,7 @@ func TestIsolaitDirsNeverExposed(t *testing.T) {
 	s := testSpec()
 	s.AgentHome = state + "/homes/claude"
 	s.Stage = rt + "/api-a3f9/stage"
+	s.ResolvConf = rt + "/api-a3f9/resolv.conf" // the one generated file of the runtime dir that is bound in
 	p, err := BuildPlan(s)
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +150,7 @@ func TestIsolaitDirsNeverExposed(t *testing.T) {
 		for _, dir := range []string{cfg, state, rt} {
 			ancestor := under(dir, e.Src) // binding a parent of a protected dir would expose it
 			inside := under(e.Src, dir)
-			if ancestor || (inside && e.Src != s.AgentHome && e.Src != s.Stage) {
+			if ancestor || (inside && e.Src != s.AgentHome && e.Src != s.Stage && e.Src != s.ResolvConf) {
 				t.Errorf("plan entry %+v exposes or contains the protected directory %s", e, dir)
 			}
 		}

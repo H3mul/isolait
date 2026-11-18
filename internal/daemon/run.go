@@ -13,6 +13,7 @@ import (
 
 	"github.com/H3mul/isolait/internal/ctl"
 	"github.com/H3mul/isolait/internal/mounts"
+	"github.com/H3mul/isolait/internal/netd"
 	"github.com/H3mul/isolait/internal/plan"
 	"github.com/H3mul/isolait/internal/sandbox"
 	"github.com/H3mul/isolait/internal/session"
@@ -39,6 +40,8 @@ func RunFromFD() error {
 type sessionState struct {
 	mu       sync.Mutex
 	state    func() string // idle, detached or attached
+	net      func() string // the network engine: up, or down with the reason
+	netPID   func() int
 	spec     Spec
 	plan     *plan.Plan
 	bins     sandbox.Binaries
@@ -50,6 +53,8 @@ func (s *sessionState) status() Status {
 	defer s.mu.Unlock()
 	st := Status{ID: s.spec.ID, State: s.state(), PID: os.Getpid(), Started: s.spec.Started, Workdir: s.spec.Workdir,
 		Roots: s.bins.Roots, Ports: []int{}, EnvNames: s.envNames, Warnings: s.bins.Warnings}
+	st.Network = s.net()
+	st.NetPID = s.netPID()
 	if s.spec.LimitsNote != "" {
 		st.Limits = LimitsStatus{Reason: s.spec.LimitsNote}
 	} else {
@@ -107,7 +112,13 @@ func Run(spec Spec) error {
 	if err != nil {
 		return err
 	}
-	bs := sandbox.Spec{HostHome: spec.HostHome, AgentHome: home, Stage: stage, AllowUserns: spec.AllowUserns,
+	// the sandbox's resolver is the gateway, where the network engine answers DNS with the host's resolver
+	resolv := filepath.Join(dir, "resolv.conf")
+	if err := os.WriteFile(resolv, []byte("nameserver "+netd.GatewayAddr.String()+"\noptions timeout:3 attempts:2\n"), 0o644); err != nil {
+		return err
+	}
+	var engine *netEngine
+	bs := sandbox.Spec{ResolvConf: resolv, HostHome: spec.HostHome, AgentHome: home, Stage: stage, AllowUserns: spec.AllowUserns,
 		Env: env, UID: spec.UID, GID: spec.GID, InitExe: spec.InitExe, InitArgs: spec.InitArgs, Bwrap: spec.Bwrap}
 	p, err := sandbox.BuildPlan(bs)
 	if err != nil {
@@ -126,12 +137,18 @@ func Run(spec Spec) error {
 		return err
 	}
 	bs.Chdir = dst
+	bs.OnNetns = func(pid int) error {
+		var err error
+		engine, err = startNetEngine(spec.InitExe, pid, spec.NetTest, os.Stderr)
+		return err
+	}
 
 	box, cl, err := sandbox.Launch(bs, p, os.Stderr)
 	if err != nil {
 		return err
 	}
 	defer cl.Close()
+	defer engine.stop()
 
 	argv := append([]string{bins.AgentPath}, spec.Agent[1:]...)
 	tm := newTerminals(cl, argv, env, dst)
@@ -143,7 +160,7 @@ func Run(spec Spec) error {
 	}
 	defer attachSrv.Close()
 
-	st := &sessionState{state: tm.State, spec: spec, plan: p, bins: bins}
+	st := &sessionState{state: tm.State, spec: spec, plan: p, bins: bins, net: func() string { return engine.status() }, netPID: func() int { return engine.pid() }}
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
 		st.envNames = append(st.envNames, k)

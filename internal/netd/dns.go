@@ -31,11 +31,33 @@ type Upstream interface {
 	Exchange(ctx context.Context, query []byte, tcp bool) ([]byte, error)
 }
 
-// HostResolver forwards queries to the nameservers listed in the host's resolv.conf.
-type HostResolver struct{ Servers []string } // host:port
+// HostResolver forwards queries to the host's nameservers. With a path it re-reads that resolv.conf for every
+// query, so a VPN or network change during a long session is followed; with fixed Servers it uses those.
+type HostResolver struct {
+	Servers []string // host:port, used when path is empty
+	path    string
+}
 
-// NewHostResolver reads the nameservers from a resolv.conf (the host's /etc/resolv.conf in production).
+// NewHostResolver uses the nameservers in a resolv.conf (the host's /etc/resolv.conf in production). The file
+// must name at least one nameserver now, or the session cannot resolve anything.
 func NewHostResolver(path string) (*HostResolver, error) {
+	servers, err := parseResolvConf(path)
+	if err != nil {
+		return nil, err
+	}
+	return &HostResolver{Servers: servers, path: path}, nil
+}
+
+func (h *HostResolver) servers() []string {
+	if h.path != "" {
+		if s, err := parseResolvConf(h.path); err == nil {
+			return s
+		}
+	}
+	return h.Servers // the last good list
+}
+
+func parseResolvConf(path string) ([]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -54,13 +76,13 @@ func NewHostResolver(path string) (*HostResolver, error) {
 	if len(h.Servers) == 0 {
 		return nil, fmt.Errorf("no nameserver in %s", path)
 	}
-	return h, nil
+	return h.Servers, nil
 }
 
 // Exchange asks each nameserver in turn until one answers.
 func (h *HostResolver) Exchange(ctx context.Context, q []byte, tcp bool) ([]byte, error) {
 	var last error
-	for _, srv := range h.Servers {
+	for _, srv := range h.servers() {
 		var resp []byte
 		var err error
 		if tcp {

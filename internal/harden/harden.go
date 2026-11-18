@@ -7,6 +7,7 @@ package harden
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"syscall"
 	"unsafe"
 )
@@ -66,7 +67,8 @@ func DenyDangerousCalls() error {
 	if len(deniedCalls) == 0 {
 		return errors.New("harden: no seccomp support for this architecture")
 	}
-	if _, _, e := syscall.AllThreadsSyscall(syscall.SYS_PRCTL, prSetNoNewPrivs, 1, 0); e != 0 {
+	// no_new_privs on this thread is enough: installing the filter with TSYNC gives it to every other thread too
+	if _, _, e := syscall.Syscall(syscall.SYS_PRCTL, prSetNoNewPrivs, 1, 0); e != 0 {
 		return fmt.Errorf("harden: no_new_privs: %w", e)
 	}
 	prog := program(auditArch, deniedCalls)
@@ -83,12 +85,26 @@ const (
 	CapSysAdmin = 21
 )
 
-// KeepOnlyCaps reduces the process to exactly the given capabilities, on every thread: the effective and
-// permitted sets, the inheritable and ambient sets (emptied) and the bounding set.
-func KeepOnlyCaps(keep ...int) error {
+// ExecWithCaps replaces the current process with path, holding exactly the given capabilities: the bounding set
+// is reduced and the inheritable and ambient sets are emptied on this thread, and a process that execs as uid 0
+// gets its permitted and effective sets from the bounding set. The new process image has every thread of its own,
+// so the reduction covers all of them, and unlike a per-thread capset it works in cgo builds too (where Go's
+// AllThreadsSyscall is unavailable). It returns only on failure; file descriptors without close-on-exec survive.
+func ExecWithCaps(keep []int, path string, argv, env []string) error {
 	var mask uint64
 	for _, c := range keep {
 		mask |= 1 << uint(c)
+	}
+	runtime.LockOSThread() // everything below and the exec must happen on one thread
+	defer runtime.UnlockOSThread()
+	syscall.RawSyscall(syscall.SYS_PRCTL, prCapAmbient, prCapAmbientClr, 0) // best effort: may be unsupported
+	for c := 0; c < 64; c++ {
+		if mask&(1<<uint(c)) != 0 {
+			continue
+		}
+		if _, _, e := syscall.RawSyscall(syscall.SYS_PRCTL, prCapbsetDrop, uintptr(c), 0); e != 0 && e != syscall.EINVAL {
+			return fmt.Errorf("harden: dropping capability %d from the bounding set: %w", c, e)
+		}
 	}
 	hdr := struct {
 		version uint32
@@ -97,17 +113,8 @@ func KeepOnlyCaps(keep ...int) error {
 	var data [2]struct{ effective, permitted, inheritable uint32 }
 	data[0].effective, data[0].permitted = uint32(mask), uint32(mask)
 	data[1].effective, data[1].permitted = uint32(mask>>32), uint32(mask>>32)
-	syscall.AllThreadsSyscall(syscall.SYS_PRCTL, prCapAmbient, prCapAmbientClr, 0) // best effort: may be unsupported
-	for c := 0; c < 64; c++ {
-		if mask&(1<<uint(c)) != 0 {
-			continue
-		}
-		if _, _, e := syscall.AllThreadsSyscall(syscall.SYS_PRCTL, prCapbsetDrop, uintptr(c), 0); e != 0 && e != syscall.EINVAL {
-			return fmt.Errorf("harden: dropping capability %d from the bounding set: %w", c, e)
-		}
-	}
-	if _, _, e := syscall.AllThreadsSyscall(syscall.SYS_CAPSET, uintptr(unsafe.Pointer(&hdr)), uintptr(unsafe.Pointer(&data[0])), 0); e != 0 {
+	if _, _, e := syscall.RawSyscall(syscall.SYS_CAPSET, uintptr(unsafe.Pointer(&hdr)), uintptr(unsafe.Pointer(&data[0])), 0); e != 0 {
 		return fmt.Errorf("harden: capset: %w", e)
 	}
-	return nil
+	return syscall.Exec(path, argv, env)
 }

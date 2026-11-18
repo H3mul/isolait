@@ -34,7 +34,13 @@ type Spec struct {
 	InitExe     string   // host path of the isolait binary, bound read-only at /isolait/init as the init shim
 	InitArgs    []string // arguments after /isolait/init (default: init)
 	Bwrap       string   // path to bwrap; empty means look it up on PATH
-	UID, GID    int
+	ResolvConf  string   // host path of the generated resolver config bound at /etc/resolv.conf; empty means none
+
+	// OnNetns, when set, makes the sandbox wait (bwrap --block-fd) after its namespaces exist and before it sets
+	// up its filesystem or runs anything, and is called with the sandbox's PID so the network engine can bring up
+	// the interface in its network namespace first. An error aborts the start.
+	OnNetns  func(childPID int) error `json:"-"`
+	UID, GID int
 }
 
 // Workspaces is where the broker mounts workspaces inside the sandbox.
@@ -104,6 +110,11 @@ func BuildPlan(s Spec) (*plan.Plan, error) {
 	}
 	if s.InitExe != "" {
 		if err := add(plan.Entry{Kind: plan.RoBind, Src: s.InitExe, Dst: InitPath}); err != nil {
+			return nil, err
+		}
+	}
+	if s.ResolvConf != "" {
+		if err := add(plan.Entry{Kind: plan.RoBind, Src: s.ResolvConf, Dst: "/etc/resolv.conf"}); err != nil {
 			return nil, err
 		}
 	}

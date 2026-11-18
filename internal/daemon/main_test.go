@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/H3mul/isolait/internal/initshim"
+	"github.com/H3mul/isolait/internal/netd"
 )
 
 // The test binary stands in for `isolait`: the daemon, the scope helper and the init shim are subcommands, and
@@ -25,6 +26,12 @@ func TestMain(m *testing.M) {
 			exe, _ = filepath.EvalSymlinks(exe)
 			if err := SpawnFromStdin(exe); err != nil {
 				os.Stderr.WriteString("_spawn: " + err.Error() + "\n")
+				os.Exit(1)
+			}
+			return
+		case "netd":
+			if err := netd.Main(os.Args[2:], os.Stdin, os.Stderr); err != nil {
+				os.Stderr.WriteString("netd: " + err.Error() + "\n")
 				os.Exit(1)
 			}
 			return

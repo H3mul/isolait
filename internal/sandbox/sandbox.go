@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 
 	"github.com/H3mul/isolait/internal/plan"
 )
@@ -42,13 +43,25 @@ func Start(s Spec, p *plan.Plan, argv []string, extra []*os.File, stdin io.Reade
 	}
 	defer r.Close()
 
-	args := renderArgs(s, p, "--info-fd", "3")
+	files := append([]*os.File{w}, extra...) // w becomes fd 3, extra fd 4 onward
+	flags := []string{"--info-fd", "3"}
+	var releaseR, releaseW *os.File
+	if s.OnNetns != nil {
+		if releaseR, releaseW, err = os.Pipe(); err != nil {
+			return nil, err
+		}
+		defer releaseR.Close()
+		defer releaseW.Close()
+		files = append(files, releaseR)
+		flags = append(flags, "--block-fd", strconv.Itoa(3+len(files)-1))
+	}
+	args := renderArgs(s, p, flags...)
 	args = append(args, "--")
 	args = append(args, argv...)
 	cmd := exec.Command(bwrap, args...)
 	cmd.Env = []string{} // bwrap's own environment is irrelevant; the sandbox gets --clearenv plus --setenv
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
-	cmd.ExtraFiles = append([]*os.File{w}, extra...) // w becomes fd 3, extra fd 4 onward
+	cmd.ExtraFiles = files
 	if err := cmd.Start(); err != nil {
 		w.Close()
 		return nil, err
@@ -62,6 +75,19 @@ func Start(s Spec, p *plan.Plan, argv []string, extra []*os.File, stdin io.Reade
 		cmd.Process.Kill()
 		cmd.Wait()
 		return nil, fmt.Errorf("sandbox did not start (no child pid from bwrap): %v", err)
+	}
+	if s.OnNetns != nil {
+		// the sandbox exists in its namespaces but is blocked: bring up its network, then let it go
+		if err := s.OnNetns(info.ChildPID); err != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+			return nil, err
+		}
+		if _, err := releaseW.Write([]byte{1}); err != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+			return nil, fmt.Errorf("releasing the sandbox: %w", err)
+		}
 	}
 	return &Sandbox{Cmd: cmd, ChildPID: info.ChildPID, Plan: p}, nil
 }

@@ -156,3 +156,19 @@ func TestHostAddressesAreIPv4Only(t *testing.T) {
 		}
 	}
 }
+
+// The engine's policy includes the host's own addresses. (The machine running the tests usually has only private
+// addresses, which the range rules refuse anyway, so the host's address source is replaced by a public-looking one.)
+func TestTheEnginePolicyRefusesTheHostsOwnAddresses(t *testing.T) {
+	old := hostAddrs
+	defer func() { hostAddrs = old }()
+	hostAddrs = func() []netip.Addr { return []netip.Addr{netip.MustParseAddr("93.184.216.99")} }
+	p := productPolicy()
+	err := p.Check(netip.MustParseAddr("93.184.216.99"))
+	if err == nil || !strings.Contains(err.Error(), "host itself") {
+		t.Errorf("the host's own public address: %v, want refused as the host itself", err)
+	}
+	if err := p.Check(netip.MustParseAddr("93.184.216.34")); err != nil {
+		t.Errorf("another public address must stay reachable: %v", err)
+	}
+}

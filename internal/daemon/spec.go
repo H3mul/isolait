@@ -30,6 +30,7 @@ type Spec struct {
 	Bwrap       string   // path to bwrap, resolved by the launcher (the daemon runs with an empty environment)
 	InitExe     string   // host path of the isolait binary, run inside the sandbox as the init shim
 	InitArgs    []string // arguments after the shim path (default: init); tests use their own
+	NetTest     *NetTest // tests only: route the sandbox's traffic to local fixtures
 	Started     time.Time
 }
 
@@ -53,4 +54,6 @@ type Status struct {
 	EnvNames []string     `json:"env"`      // variable names passed in (never values)
 	Warnings []string     `json:"warnings"` // start-time warnings, e.g. dangling links
 	Limits   LimitsStatus `json:"limits"`
+	Network  string       `json:"network"`           // up, or down with the reason
+	NetPID   int          `json:"net_pid,omitempty"` // the network engine process, for debugging
 }

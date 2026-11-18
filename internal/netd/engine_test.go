@@ -483,9 +483,19 @@ func TestResolvConfParsing(t *testing.T) {
 		}
 		return p
 	}
-	h, err := NewHostResolver(write("# comment\nsearch lan\nnameserver 127.0.0.53\nnameserver fe80::1%eth0\noptions edns0\n"))
+	path := write("# comment\nsearch lan\nnameserver 127.0.0.53\nnameserver fe80::1%eth0\noptions edns0\n")
+	h, err := NewHostResolver(path)
 	if err != nil || len(h.Servers) != 2 || h.Servers[0] != "127.0.0.53:53" || h.Servers[1] != "[fe80::1]:53" {
 		t.Errorf("%v %v", h, err)
+	}
+	// the file is re-read: a change during the session is followed, and a broken file keeps the last good list
+	write("nameserver 9.9.9.9\n")
+	if s := h.servers(); len(s) != 1 || s[0] != "9.9.9.9:53" {
+		t.Errorf("a changed resolv.conf was not followed: %v", s)
+	}
+	write("# nothing usable\n")
+	if s := h.servers(); len(s) != 2 {
+		t.Errorf("a resolv.conf without nameservers must not lose the last good list: %v", s)
 	}
 	if _, err := NewHostResolver(write("search lan\n")); err == nil {
 		t.Error("a resolv.conf without a nameserver was accepted")

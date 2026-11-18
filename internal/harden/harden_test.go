@@ -42,7 +42,7 @@ func toString(v any) string {
 	return "panic"
 }
 
-var helpers = map[string]func(map[string]string){"filter": helperFilter} // the security tier adds "caps"
+var helpers = map[string]func(map[string]string){"filter": helperFilter} // the security tier adds "caps" and "caps2"
 
 func errno(e syscall.Errno) string {
 	if e == 0 {

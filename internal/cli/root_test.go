@@ -33,7 +33,7 @@ func TestVersionRejectsArgs(t *testing.T) {
 // Internal commands exist but stay out of the help text.
 func TestInternalCommandsAreHidden(t *testing.T) {
 	root := Root()
-	for _, name := range []string{"init", "preflight"} {
+	for _, name := range []string{"init", "preflight", "netd"} {
 		c, _, err := root.Find([]string{name})
 		if err != nil || c.Name() != name || !c.Hidden {
 			t.Errorf("%s: %v hidden=%v", name, err, c != nil && c.Hidden)

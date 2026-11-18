@@ -79,8 +79,16 @@ line exists, its mutation in the same change.
 | 1.6 | At the engine: blocked destinations (private, metadata, CGNAT, host address, documentation) are refused without ever reaching the dialer; the gateway accepts only DNS; the connection limit holds and frees slots; the engine's own dialer enforces the policy at dial time | Decision 5; Spec: Private and local ranges blocked | `netd.TestBlockedDestinationsNeverReachTheDialer`, `TestGatewayAcceptsOnlyDNS`, `TestConnectionLimit`, `TestDefaultDialerRefusesLoopbackAtDialTime` | M67, M68, M72, M73 | fast |
 | 1.6 | DNS to the gateway over UDP and TCP is answered by the host resolver (a TCP guest gets a TCP upstream), the answer comes from the gateway so the host resolver's address is never exposed, malformed messages and responses are dropped without reaching the resolver, and a name whose answer is a private address resolves but the connection to it is refused | Spec: DNS resolution; Name resolving to a private address | `netd.TestDNSOverUDPIsAnsweredByTheHostResolver`, `TestDNSOverTCPIsAnswered`, `TestMalformedDNSIsDropped`, `TestNameResolvingToAPrivateAddressIsRefused`, `TestResolvConfParsing` | M71, M74 | fast |
 | 1.6 | Non-DNS UDP (to the gateway on another port, to a public address on 53 or any port) and ICMP echo are dropped and the stack never answers a ping for an address it does not own | Spec: Unsupported traffic dropped | `netd.TestNonDNSUDPIsDropped`, `TestICMPIsDropped` | M69, M70 | fast |
-| 1.6 | The network engine process has no mount authority: a seccomp filter denies the mount family (`mount`, `umount2`, `pivot_root`, `chroot`, `open_tree`, `move_mount`, `fsopen`/`fsconfig`/`fsmount`/`fspick`, `mount_setattr`), swap, reboot, kexec, module loading, ptrace, cross-process memory access, `unshare` and file-handle opening, on every thread including threads created later, while `setns` stays allowed; in the broker namespace `mount` works before the filter and is `EPERM` after it | Decision 5 (`netd` has no mount capability) | `harden.TestSeccompDeniesDangerousCallsOnEveryThread`, `TestKeepOnlyCapsAndNoMountAuthority`, `TestProgramLayout`, `TestEveryDeniedCallIsDistinctAndTheTableIsComplete` | M75, M76, M79 | fast + security |
-| 1.6 | The engine keeps exactly `CAP_NET_ADMIN` and `CAP_SYS_ADMIN` (effective, permitted and bounding), no inheritable or ambient capabilities, on every thread that already existed | Decision 5 | `harden.TestKeepOnlyCapsAndNoMountAuthority` | M77, M78 | security |
+| 1.6 | The network engine process has no mount authority: a seccomp filter denies the mount family (`mount`, `umount2`, `pivot_root`, `chroot`, `open_tree`, `move_mount`, `fsopen`/`fsconfig`/`fsmount`/`fspick`, `mount_setattr`), swap, reboot, kexec, module loading, ptrace, cross-process memory access, `unshare` and file-handle opening, on every thread including threads created later, while `setns` stays allowed; in the broker namespace `mount` works before the filter and is `EPERM` after it | Decision 5 (`netd` has no mount capability) | `harden.TestSeccompDeniesDangerousCallsOnEveryThread`, `TestExecWithCapsAndNoMountAuthority`, `TestProgramLayout`, `TestEveryDeniedCallIsDistinctAndTheTableIsComplete` | M75, M76, M79 | fast + security |
+| 1.6 | The engine process, re-executed with a reduced bounding set (this works in cgo builds, where per-thread capability changes do not), keeps exactly `CAP_NET_ADMIN` and `CAP_SYS_ADMIN` (effective, permitted and bounding), no inheritable or ambient capabilities, on every one of its threads | Decision 5 | `harden.TestExecWithCapsAndNoMountAuthority` | M77, M78 | security |
+| 1.6, 1.7 | On the real kernel, through a real session: the sandbox sees only `lo` and the managed `tap0`; IPv6 is disabled (no IPv6 address anywhere); `/etc/resolv.conf` names only the gateway; a name lookup is answered by the host resolver; TCP to a public address is forwarded; an unknown name does not resolve | Spec: Outbound TCP to the internet; DNS resolution; Isolation from host networking | `daemon.TestSandboxNetworkEndToEnd` | M80, M81, M82, M86 | security |
+| 1.6 | The sandbox cannot reach private, LAN, CGNAT, metadata, gateway (other than DNS) or host-loopback addresses, nor an address its own DNS answer named, nor the host's own address | Spec: Private and local ranges blocked; Isolation from host networking | `daemon.TestSandboxCannotReachPrivateLocalOrMetadataAddresses`, `netd.TestTheEnginePolicyRefusesTheHostsOwnAddresses` | M85 | security + fast |
+| 1.6 | A closed upstream port is a refused connect inside the sandbox (not a connect that succeeds and then resets), quickly | Spec: Connection semantics | `daemon.TestClosedUpstreamPortIsRefusedNotAccepted` | M66 | security |
+| 1.6 | The sandbox holds no network capability: bringing `tap0` down, setting an address, raw and packet sockets are all refused | Spec: Enforcement outside the sandbox | `daemon.TestSandboxCannotChangeItsNetwork` | n/a (the sandbox's capabilities are dropped; see M02/M03 family) | security |
+| 1.6 | The engine process runs hardened on every thread: exactly `CAP_NET_ADMIN`+`CAP_SYS_ADMIN` (permitted, effective, bounding; nothing inheritable or ambient), `no_new_privs`, a seccomp filter; its pid does not exist inside the sandbox and a `kill -9 -1` from the sandbox leaves it and the network working | Decision 5; Spec: Enforcement outside the sandbox | `daemon.TestEngineProcessIsHardenedAndSurvivesSandboxSignals` | M83, M84 | security |
+| 1.6 | A dead engine is reported by `status` (`network: down: ...`) without ending the session; an engine that fails to start (here: a bad flag) fails the whole session start with its error text and leaves no process behind | Decision 5 | `daemon.TestEngineDeathIsReportedAndDoesNotEndTheSession`, `daemon.TestFailingEngineFailsTheStartAndLeavesNothing` | n/a | security |
+| 1.6 | The sandbox is held (`--block-fd`) after its namespaces exist and released only after the engine reports ready: no sandbox process runs before its network is hardened and up | Decision 5 (start order) | every daemon session test (the init shim answers only after release); `daemon.TestSandboxNetworkEndToEnd` | M86 | security |
+| netlink | The rtnetlink messages (link up, address, default route) are well formed and kernel errors are parsed | Decision 5 | `netd.TestNetlinkMessagesAreWellFormed`, `TestAckErrorParsing` | n/a | fast |
 
 ## Host-assumption canaries
 
@@ -97,7 +105,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(79 of 79) on 2026-11-17.
+(86 of 86) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -175,11 +183,18 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M72 | The connection limit is not enforced | `netd.TestConnectionLimit` |
 | M73 | The engine's dialer has no dial-time policy | `netd.TestDefaultDialerRefusesLoopbackAtDialTime` |
 | M74 | A TCP DNS query is sent upstream over UDP | `netd.TestDNSOverTCPIsAnswered` |
-| M75 | `mount` is missing from the seccomp denylist | `harden.TestKeepOnlyCapsAndNoMountAuthority` |
+| M75 | `mount` is missing from the seccomp denylist | `harden.TestExecWithCapsAndNoMountAuthority` |
 | M76 | The filter is installed on the calling thread only | `harden.TestSeccompDeniesDangerousCallsOnEveryThread` |
-| M77 | Capabilities are dropped on the calling thread only | `harden.TestKeepOnlyCapsAndNoMountAuthority` |
+| M77 | Inheritable capabilities survive the re-exec | `harden.TestExecWithCapsAndNoMountAuthority` |
 | M78 | The bounding set is not reduced | same |
 | M79 | The filter's default for denied calls is allow | `harden.TestProgramLayout`, `TestSeccompDeniesDangerousCallsOnEveryThread` |
+| M80 | IPv6 is not disabled in the sandbox's netns | `daemon.TestSandboxNetworkEndToEnd` |
+| M81 | The sandbox gets no default route | same |
+| M82 | The sandbox's resolver is not the gateway | same |
+| M83 | The engine does not install its seccomp filter | `daemon.TestEngineProcessIsHardenedAndSurvivesSandboxSignals` |
+| M84 | The engine keeps its full capabilities (no re-exec with a reduced set) | same |
+| M85 | The engine's policy ignores the host's own addresses | `netd.TestTheEnginePolicyRefusesTheHostsOwnAddresses` |
+| M86 | The sandbox runs without a network engine | `daemon.TestSandboxNetworkEndToEnd`, `TestEngineProcessIsHardenedAndSurvivesSandboxSignals` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not
@@ -190,8 +205,7 @@ credential read, and the 0700 runtime directory is the primary defence).
 
 | Spike | Assumption | Design decision | Lands with | Guard test (planned) |
 |---|---|---|---|---|
-| 1.6 | On the real kernel: the engine behind a real tap in the sandbox's netns forwards the sandbox's TCP and DNS | Decision 5 | 5.2, 5.6 | security tests |
-| 1.6 | IPv6 is disabled in the sandbox and the sandbox sees only the managed interface (non-DNS UDP and ICMP are done, see the matrix) | Decision 5 | 5.2 | security test; mutation: leave IPv6 enabled |
+| 1.6 | A real agent reaching its real API through the engine | Decision 5 | 5.6 (manual, `e2e.md`) | n/a |
 | 1.7 | A port grant is a listener on the sandbox loopback forwarded to host `127.0.0.1`; reachable only after `allow`, refused after `deny`, other host services unreachable | Decision 5 | 7.1 to 7.3 | security test; mutation: listen before the grant |
 | 1.8 | A real Claude Code and OpenCode through the relay | Decision 4 | manual, `docs/manual-checks.md` | n/a |
 | 1.2, 1.9 | A busy workspace is reported with its blocking processes; `--force` detaches lazily; a protected path or any ancestor is refused by dev+inode, including after a symlink swap | Decisions 2, 3 | 6.1, 6.4, 6.7 | deny-list unit tests plus a security test; mutation: compare paths as strings |
