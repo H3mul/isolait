@@ -26,16 +26,16 @@ inside the terminal, never by the agent.
 
 ## Security audit and tech stack
 
-The sandbox was audited from the inside with public container-escape and privilege-escalation tools (linpeas,
-deepce, botb) plus hand probes, run as the agent of throwaway sessions. Last run 2026-11-18, WSL2 kernel
-6.18.58.1. The tools found no capabilities, no container runtime socket, no reachable metadata service and no
-kernel exploit match. The hand probes found real gaps the tools did not flag, which are open
-(change `audit-findings-hardening`):
+The sandbox is audited from the inside with public container-escape and privilege-escalation tools run as the agent
+of a throwaway session: linpeas 20261117-8bfcfa5c, deepce 420b1d1ddb63 and botb 1.8.0, pinned by checksum in
+`scripts/audit/tools.lock`. Last run 2026-11-18, WSL2 kernel 6.18.58.1: 19 assertions held, none failed (no
+capabilities, `NoNewPrivs`, a seccomp filter, no container runtime socket, no reachable metadata service, no kernel
+exploit match). The first audit's hand probes found two real gaps the tools did not flag, both now fixed and guarded by tests:
+the host user's kernel keyrings were reachable (fixed by the seccomp filter and a `/proc/keys` mask) and on WSL2 the Windows
+driver store was visible in `/usr` (fixed by masking foreign submounts).
 
-- kernel keyrings are shared with the host user, and isolait installs no seccomp filter yet;
-- on WSL2, `/usr` carries the Windows driver store mount (read-only) into the sandbox.
-
-These tools are heuristics: a clean report is not proof of safety. Tools, checksums and per-tool results:
+These tools are heuristics: a clean report is not proof of safety. The deterministic probes run on every push; the tools run on
+release tags and on demand (`make audit`). Details, rules and the release checklist:
 [docs/security-tests.md](docs/security-tests.md#security-audit).
 
 Stack: Go; user, pid, ipc, uts, cgroup and network namespaces through bubblewrap; a userspace network engine on

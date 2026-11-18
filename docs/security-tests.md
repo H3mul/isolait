@@ -262,13 +262,10 @@ directories), with the tool mounted read-only. Last run: 2026-11-18, WSL2 kernel
 | [botb](https://github.com/brompwnie/botb) `botb-linux-amd64` (`3aae4a2bf41aedaa`) | break-out-the-box: container sockets, metadata services, Kubernetes secrets, recon | no Docker socket, no metadata service reachable, no Kubernetes secrets. Its "valid socket" report was a false positive: the sockets were created inside the sandbox by linpeas's own `gpg` run |
 | hand probes | capabilities, namespaces, host paths, mounts, sockets, keyrings | host home, `/run`, `/mnt`, `/init`, `/dev/kvm`, docker sockets absent; user namespaces and `mount` blocked; PID namespace shows only the session's processes |
 
-**Known findings, not yet fixed** (change `audit-findings-hardening`):
-
-- **Kernel keyrings are shared with the host user.** From inside the sandbox, host keys that grant user-read permission
-  could be read and changed, and keys could be added to or removed from the host user keyring (verified with canary
-  keys; default-permission keys held). The fix is a syscall filter plus masking `/proc/keys`.
-- **On WSL2, `/usr` carries the Windows driver store mount** (`/usr/lib/wsl/drivers`, read-only) into the sandbox.
-- isolait does not install a seccomp filter yet; the fix above adds one.
+**Findings of the first audit, now fixed** (change `audit-findings-hardening`): kernel keyrings shared with the host user (seccomp
+deny list and `/proc/keys` mask; `TestKeyringsAreNotSharedWithTheHost`), the WSL2 driver store carried into `/usr` (foreign submounts masked;
+`TestForeignSubmountsAreMasked`), and no seccomp filter (now installed; `TestSeccompDenyListInTheSession`). The table above is the 2026-11-18 manual run;
+the repeatable run is `make audit` (see Running).
 
 These tools are heuristics: a clean report is not proof of safety, and the audit found a real gap that the tools did not
 flag (it came from a hand probe). A repeatable audit (pinned tools, deterministic probes on every push, the full tool run on release
