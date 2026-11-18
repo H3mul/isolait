@@ -66,6 +66,8 @@ line exists, its mutation in the same change.
 | 1.3 | On the real kernel: attach and exec reach shells inside the sandbox (cwd `/workspaces/<name>`, the fake home, the user's uid, a real tty, the requested size); a second shell sees the same mounts; **nothing in the sandbox can find or reach the daemon's control or attach sockets**; detach and reattach return to the same shell | Spec: Control surface unreachable from sandbox | `daemon.TestAttachAndExecInTheRealSandbox` | stop mounting the runtime dir into the plan (covered by `sandbox.TestIsolaitDirsNeverExposed`); drop the sandbox | security |
 | hardening | The attach frame protocol: round trip of every frame type, oversized and truncated frames rejected | Decision 4 | `attach.TestFramesRoundTrip`, `TestOversizedAndTruncatedFramesAreRejected` | n/a | fast |
 | 1.8 | The leader key is recognised only from real keyboard input: never inside a bracketed paste (also not when pasting into the prompt), a paste cancels a pending leader, paste markers are stripped unless the agent asked for them, a lone Escape is released by `Flush` and not delayed for ever, input split at any byte boundary gives the same decisions, random paste traffic never produces a detach or prompt | Spec: Leader key from real input only | `term.TestLeaderCommands`, `TestLeaderInsidePasteIsNeverRecognised`, `TestPasteIntoThePromptGoesToThePrompt`, `TestPasteCancelsAPendingLeader`, `TestLoneEscapeIsReleasedByFlush`, `TestSplitInputGivesTheSameEvents`, `TestRandomPastesNeverTriggerTheLeader`, `TestParseLeader` | M35 to M39 | fast |
+| 1.8 | The relay sanitizes agent output before it reaches the terminal (also sequences split across frames) and forwards keyboard input; leader then d detaches; an exit frame ends it with the code; a refused attach is an error; a dropped connection or closed input ends it cleanly; paste markers are kept only for an agent that enabled bracketed paste, and the agent's own paste-mode toggle never reaches the terminal; a lone Escape reaches the agent | Decision 4 (relay) | `relay.TestOutputIsSanitizedAndInputForwarded`, `TestLeaderDetaches`, `TestExitFrameEndsTheRelayWithTheCode`, `TestRefusedAttachIsAnError`, `TestDroppedConnectionAndClosedInputEndTheRelay`, `TestPasteMarkersAreStrippedUnlessTheAgentAsked`, `TestLoneEscapeReachesTheAgent` | M40, M43, M45, M46 | fast |
+| 1.8 | With a real terminal (a pty): raw mode (no local echo), bracketed paste enabled on the real terminal, the hello carries its size, window-size changes are forwarded, and on exit the terminal is restored exactly (termios) and left usable (alternate screen, mouse, cursor, colours reset) | Decision 4 (relay) | `relay.TestRealTerminalRawModePasteModeSizeAndRestore`, `pty.TestRawModeAndRestore`, `pty.TestSizeRoundTrip` | M41, M42, M44 | fast |
 
 ## Host-assumption canaries
 
@@ -82,7 +84,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(39 of 39) on 2026-11-17.
+(46 of 46) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -125,6 +127,13 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M37 | A held lone Escape is never released | `term.TestLoneEscapeIsReleasedByFlush` |
 | M38 | Leader twice does not send a literal leader | `term.TestLeaderCommands` |
 | M39 | A paste does not cancel a pending leader | `term.TestPasteCancelsAPendingLeader` |
+| M40 | Agent output reaches the terminal unsanitized | `relay.TestOutputIsSanitizedAndInputForwarded` |
+| M41 | Bracketed paste is not enabled on the real terminal | `relay.TestRealTerminalRawModePasteModeSizeAndRestore` |
+| M42 | The terminal is not restored on exit | same |
+| M43 | The agent's bracketed-paste request is not tracked | `relay.TestPasteMarkersAreStrippedUnlessTheAgentAsked` |
+| M44 | Window-size changes are not forwarded | `relay.TestRealTerminalRawModePasteModeSizeAndRestore` |
+| M45 | A held lone Escape is never released | `relay.TestLoneEscapeReachesTheAgent` |
+| M46 | Detach is not sent to the daemon | `relay.TestLeaderDetaches` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not

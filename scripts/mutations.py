@@ -106,6 +106,20 @@ M = [
      "./internal/term", "TestLeaderCommands", False, 60),
     ("M39", "internal/term/input.go", "f.afterLead = false // the leader was not followed by a command: a paste cancels it\n\tf.inPaste = true", "f.inPaste = true",
      "./internal/term", "TestPasteCancelsAPendingLeader", False, 60),
+    ("M40", "internal/relay/relay.go", "clean := append([]byte(nil), s.san.Write(f.Payload)...)", "clean := append([]byte(nil), f.Payload...)",
+     "./internal/relay", "TestOutputIsSanitizedAndInputForwarded", False, 60),
+    ("M41", "internal/relay/relay.go", 's.writeOut([]byte("\\x1b[?2004h"))', "s.writeOut(nil)",
+     "./internal/relay", "TestRealTerminalRawModePasteModeSizeAndRestore", False, 60),
+    ("M42", "internal/relay/relay.go", "pty.Restore(fd, old)", "_ = old",
+     "./internal/relay", "TestRealTerminalRawModePasteModeSizeAndRestore", False, 60),
+    ("M43", "internal/relay/relay.go", "s.filter.SetAgentPaste(s.san.Modes().BracketedPaste)", "s.filter.SetAgentPaste(false)",
+     "./internal/relay", "TestPasteMarkersAreStrippedUnlessTheAgentAsked", False, 60),
+    ("M44", "internal/relay/relay.go", "s.conn.Send(attach.Frame{Type: attach.Resize, Payload: attach.ResizePayload(cols, rows)})", "_ = cols + rows",
+     "./internal/relay", "TestRealTerminalRawModePasteModeSizeAndRestore", False, 60),
+    ("M45", "internal/relay/relay.go", "if pending { // maybe the start of a paste marker", "if false && pending { // maybe the start of a paste marker",
+     "./internal/relay", "TestLoneEscapeReachesTheAgent", False, 60),
+    ("M46", "internal/relay/relay.go", "s.conn.Send(attach.Frame{Type: attach.Detach})\n\t\t\ts.finish(Result{Detached: true}, nil)", "s.finish(Result{Detached: true}, nil)",
+     "./internal/relay", "TestLeaderDetaches", False, 60),
 ]
 
 
