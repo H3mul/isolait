@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 )
@@ -123,6 +124,11 @@ func (s *shim) spawn(req Request, files []*os.File) {
 		fail(fmt.Sprintf("spawn needs 3 stdio files, got %d", len(files)))
 		return
 	}
+	argv0, err := lookPath(req.Argv[0], req.Env)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
 	attr := &syscall.ProcAttr{
 		Dir:   req.Cwd,
 		Env:   req.Env,
@@ -132,7 +138,7 @@ func (s *shim) spawn(req Request, files []*os.File) {
 	// The reaper takes the same lock before looking a pid up, so even an instant exit is attributed.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	pid, _, err := syscall.StartProcess(req.Argv[0], req.Argv, attr)
+	pid, _, err := syscall.StartProcess(argv0, req.Argv, attr)
 	if err != nil {
 		fail(err.Error())
 		return
@@ -194,4 +200,28 @@ func (s *shim) reap() {
 
 func (s *shim) report(pid, id int, e exit) {
 	s.send(Event{Event: "exited", ID: id, PID: pid, Code: e.code, Signal: e.sig})
+}
+
+// lookPath resolves a bare command name on the PATH of the environment it will run with, inside the sandbox
+// (this process lives there, so it sees exactly the sandbox's filesystem).
+func lookPath(name string, env []string) (string, error) {
+	if strings.Contains(name, "/") {
+		return name, nil
+	}
+	path := "/usr/bin:/bin"
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+			path = v
+		}
+	}
+	for _, dir := range strings.Split(path, ":") {
+		if dir == "" || !strings.HasPrefix(dir, "/") {
+			continue
+		}
+		p := dir + "/" + name
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("command not found: %s", name)
 }

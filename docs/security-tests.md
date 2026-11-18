@@ -60,6 +60,11 @@ line exists, its mutation in the same change.
 | S1 | The daemon starts inside `isolait-<sid>.scope` with the configured `TasksMax`, `MemoryMax` and `CPUQuota`, `status` reports usage, and the scope disappears on stop | Decision 4 | `daemon.TestLimitsAppliedThroughScope`, `daemon.TestScopeArgs`, `daemon.TestReadUsage` | drop a `-p` property from `ScopeArgs` | fast + security |
 | S1 | Without a systemd user manager (or when the scope fails) the session still starts and `status` says why limits are unavailable; with `limits.required` the start is refused | Decision 4 | `daemon.TestLimitsUnavailableIsVisibleAndNotFatal`, `daemon.TestRequiredLimitsRefuseToStartWithoutSystemd`, `config.TestLimitsDefaultsMergeAndValidation` | silently ignore a failed scope | fast + security |
 | 1.8 | The output sanitizer drops every OSC except OSC 8 (clipboard writes, titles, colour queries), all DCS/APC/PM/SOS strings, every `CSI ... t` and ENQ; consumes bracketed-paste toggles; forwards colours, cursor movement, hyperlinks and the alternate screen unchanged; sequences split at any byte boundary give the same output; random mixed streams never forward a forbidden sequence; over-long sequences are bounded | Decision 4 (sanitizer) | `term.TestSanitizeTable`, `TestSplitReadsGiveTheSameOutput`, `TestRandomStreamsNeverLeakForbiddenSequences`, `TestModesAreTracked`, `TestOverlongSequencesAreBounded` | M23 to M27 | fast |
+| 1.8 | The daemon owns the PTYs and every PTY byte (agent, unattended agent, exec) goes through one `output()` function, the seam for a future log tee or scrollback; an unattended agent is drained and never blocks on a full terminal (3 MB test); output is raw (the client sanitizes) | Decision 4 (PTY ownership, scrollback seam) | `daemon.TestAllPTYOutputFlowsThroughTheSingleOutputPath`, `TestUnattendedAgentNeverBlocksOnOutput` | M28 | fast |
+| 1.8 | One client at a time per agent; attach starts the agent, reattach to a running agent restores its alternate-screen mode and asks it to repaint; an agent that exited is reported with its code and restarted by the next attach; detach keeps it running; resize reaches the terminal | Spec: Detach and attach; Agent restart | `daemon.TestAttachStartsAgentAndRelaysInput`, `TestSecondAgentClientIsRejected`, `TestDetachKeepsAgentRunningAndReattachRestoresModes`, `TestAgentExitIsReportedAndReattachRestartsIt`, `TestResizeReachesTheTerminal`, `TestRedrawFrameSignalsTheAgent` | M29, M30, M34 | fast |
+| hardening | `exec` runs a new process on its own PTY in the same sandbox, resolves commands on the sandbox PATH, never outlives its client, and does not change the agent's state; hellos are validated (mode, command, TERM replaced when it is not a safe name, window size clamped) | Spec: Exec in a running sandbox | `daemon.TestExecRunsInTheSandboxAndReportsExit`, `TestExecDoesNotOutliveItsClient`, `TestExecOfAMissingCommandIsRefused`, `TestBadHellosAreRefused`, `TestTermIsSanitizedAndSizeClamped` | M31, M32, M33 | fast |
+| 1.3 | On the real kernel: attach and exec reach shells inside the sandbox (cwd `/workspaces/<name>`, the fake home, the user's uid, a real tty, the requested size); a second shell sees the same mounts; **nothing in the sandbox can find or reach the daemon's control or attach sockets**; detach and reattach return to the same shell | Spec: Control surface unreachable from sandbox | `daemon.TestAttachAndExecInTheRealSandbox` | stop mounting the runtime dir into the plan (covered by `sandbox.TestIsolaitDirsNeverExposed`); drop the sandbox | security |
+| hardening | The attach frame protocol: round trip of every frame type, oversized and truncated frames rejected | Decision 4 | `attach.TestFramesRoundTrip`, `TestOversizedAndTruncatedFramesAreRejected` | n/a | fast |
 
 ## Host-assumption canaries
 
@@ -76,7 +81,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(27 of 27) on 2026-11-17.
+(34 of 34) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -107,6 +112,13 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M25 | DCS, APC, PM and SOS forwarded | same |
 | M26 | Bracketed-paste toggles forwarded to the terminal | `term.TestSanitizeTable`, `TestModesAreTracked` |
 | M27 | A partly received sequence is forgotten between reads | `term.TestSplitReadsGiveTheSameOutput`, `TestRandomStreamsNeverLeakForbiddenSequences` |
+| M28 | An unattended agent is no longer drained (it would block on a full PTY) | `daemon.TestUnattendedAgentNeverBlocksOnOutput` |
+| M29 | A second client can attach to an attached agent | `daemon.TestSecondAgentClientIsRejected` |
+| M30 | Reattach does not restore the agent's alternate-screen mode | `daemon.TestDetachKeepsAgentRunningAndReattachRestoresModes` |
+| M31 | An exec process outlives its client | `daemon.TestExecDoesNotOutliveItsClient` |
+| M32 | `TERM` from the client is passed on unchecked | `daemon.TestTermIsSanitizedAndSizeClamped` |
+| M33 | Window size from the client is not clamped | `daemon.TestTermIsSanitizedAndSizeClamped` |
+| M34 | The exit frame is never sent | `daemon.TestAgentExitIsReportedAndReattachRestartsIt` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not
@@ -122,5 +134,5 @@ credential read, and the 0700 runtime directory is the primary defence).
 | 1.7 | A port grant is a listener on the sandbox loopback forwarded to host `127.0.0.1`; reachable only after `allow`, refused after `deny`, other host services unreachable | Decision 5 | 7.1 to 7.3 | security test; mutation: listen before the grant |
 | 1.8 | The PTY relay redraws on attach and handles alt-screen apps (the sanitizer half is done, see the matrix) | Decision 4 | 4.2 | relay tests through a test PTY; mutation: skip the redraw |
 | 1.2, 1.9 | A busy workspace is reported with its blocking processes; `--force` detaches lazily; a protected path or any ancestor is refused by dev+inode, including after a symlink swap | Decisions 2, 3 | 6.1, 6.4, 6.7 | deny-list unit tests plus a security test; mutation: compare paths as strings |
-| 1.3 | The sandbox cannot reach the control socket or the runtime directory (probe from inside); no unapproved network | Decision 4 | 8.2 | the isolation regression suite |
+| 1.3 | No unapproved network from inside the sandbox (the control-surface half is done, see the matrix) | Decision 4 | 8.2 | the isolation regression suite |
 | S2 to S4 | Landlock ceiling | `sandbox-hardening` D2 and D3 | deferred to Phase 2 | S2 to S4 spikes remain in the store; revisit triggers in the design |

@@ -3,6 +3,8 @@
 package daemon
 
 import (
+	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,37 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/H3mul/isolait/internal/initshim"
+	"github.com/H3mul/isolait/internal/attach"
 	"github.com/H3mul/isolait/internal/session"
 )
 
-// Real-kernel lifecycle (task 3.8): the test binary stands in for `isolait` (daemon and init subcommands).
-func TestMain(m *testing.M) {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "daemon":
-			if err := RunFromFD(); err != nil {
-				os.Stderr.WriteString("daemon: " + err.Error() + "\n")
-				os.Exit(1)
-			}
-			return
-		case "_spawn":
-			exe, _ := os.Executable()
-			exe, _ = filepath.EvalSymlinks(exe)
-			if err := SpawnFromStdin(exe); err != nil {
-				os.Stderr.WriteString("_spawn: " + err.Error() + "\n")
-				os.Exit(1)
-			}
-			return
-		case "__isolait_init__":
-			if err := initshim.Run(os.NewFile(initshim.ControlFD, "control")); err != nil {
-				os.Exit(1)
-			}
-			return
-		}
-	}
-	os.Exit(m.Run())
-}
+// Real-kernel lifecycle (task 3.8): the test binary stands in for `isolait` (see main_test.go).
 
 type env struct {
 	base, state, work string
@@ -315,4 +291,107 @@ func TestLimitsUnavailableIsVisibleAndNotFatal(t *testing.T) {
 			}
 		})
 	}
+}
+
+// dialAttach connects to a real session's attach socket.
+func dialAttach(t *testing.T, e env, id string, h attach.HelloMsg) (*attach.Conn, net.Conn, attach.Reply) {
+	t.Helper()
+	raw, err := net.Dial("unix", session.AttachPath(e.base, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { raw.Close() })
+	c := attach.NewConn(raw)
+	if err := c.SendJSON(attach.Hello, h); err != nil {
+		t.Fatal(err)
+	}
+	f, err := c.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r attach.Reply
+	if err := json.Unmarshal(f.Payload, &r); err != nil {
+		t.Fatal(err)
+	}
+	return c, raw, r
+}
+
+func readUntil(t *testing.T, c *attach.Conn, raw net.Conn, want string) string {
+	t.Helper()
+	raw.SetReadDeadline(time.Now().Add(15 * time.Second))
+	var sb strings.Builder
+	for !strings.Contains(sb.String(), want) {
+		f, err := c.Recv()
+		if err != nil {
+			t.Fatalf("connection ended before %q appeared: %v (got %q)", want, err, sb.String())
+		}
+		if f.Type == attach.Data {
+			sb.Write(f.Payload)
+		}
+		if f.Type == attach.Exit {
+			break
+		}
+	}
+	return sb.String()
+}
+
+// 4.1/4.5 on the real kernel: the agent and an exec'd shell run inside the sandbox on PTYs, see the same
+// mounts, and nothing in the sandbox can find or reach the daemon's sockets.
+func TestAttachAndExecInTheRealSandbox(t *testing.T) {
+	e := newEnv(t)
+	spec := e.spec(t, "sh")
+	if err := Launch(spec, os.Args[0]); err != nil {
+		t.Skipf("cannot launch here: %v", err)
+	}
+	defer Stop(e.base, spec.ID)
+
+	c, raw, r := dialAttach(t, e, spec.ID, attach.HelloMsg{Mode: attach.ModeAgent, Term: "xterm", Cols: 100, Rows: 30})
+	if !r.OK || !r.Restarted {
+		t.Fatalf("attach: %+v", r)
+	}
+	c.Send(attach.Frame{Type: attach.Data, Payload: []byte("echo r\"\"esult cwd=$(pwd) home=$HOME user=$(id -u) tty=$(test -t 0 && echo yes) size=$(stty size) en\"\"d\n")})
+	// the terminal echoes what is typed; r""esult only becomes "result" once the shell has run the command
+	out := readUntil(t, c, raw, " end\r\n")
+	for _, want := range []string{"cwd=/workspaces/proj", "home=/home/fakeuser", "user=" + strconv.Itoa(os.Getuid()), "tty=yes", "size=30 100"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("agent shell: missing %q in %q", want, out)
+		}
+	}
+	if st, _ := Query(e.base, spec.ID); st.State != "attached" {
+		t.Errorf("state while attached: %s", st.State)
+	}
+
+	// a second shell in the same sandbox: same mounts, and the control surface is nowhere to be found
+	script := "echo ws=$(ls /workspaces); n=$(find /workspaces /tmp /home /usr /etc /isolait /dev /proc/self -name '*.sock' 2>/dev/null | wc -l); echo sockets=$n; " +
+		"for p in " + session.SocketPath(e.base, spec.ID) + " " + session.AttachPath(e.base, spec.ID) + " " + e.base + "; do [ -e $p ] && echo reachable=$p; done; echo done-exec"
+	ec, eraw, er := dialAttach(t, e, spec.ID, attach.HelloMsg{Mode: attach.ModeExec, Argv: []string{"sh", "-c", script}, Term: "xterm", Cols: 80, Rows: 24})
+	if !er.OK {
+		t.Fatalf("exec: %+v", er)
+	}
+	eo := readUntil(t, ec, eraw, "done-exec")
+	if !strings.Contains(eo, "ws=proj") || !strings.Contains(eo, "sockets=0") || strings.Contains(eo, "reachable=") {
+		t.Errorf("exec shell: %q (want the workspace, no sockets, no daemon paths)", eo)
+	}
+
+	// detach and reattach: the agent is still the same shell
+	c.Send(attach.Frame{Type: attach.Data, Payload: []byte("export MARK=survived\n")})
+	c.Send(attach.Frame{Type: attach.Detach})
+	waitState(t, e, spec.ID, "detached")
+	c2, raw2, r2 := dialAttach(t, e, spec.ID, attach.HelloMsg{Mode: attach.ModeAgent, Term: "xterm", Cols: 80, Rows: 24})
+	if !r2.OK || r2.Restarted {
+		t.Fatalf("reattach: %+v", r2)
+	}
+	c2.Send(attach.Frame{Type: attach.Data, Payload: []byte("echo mark=$MARK\n")})
+	readUntil(t, c2, raw2, "mark=survived")
+}
+
+func waitState(t *testing.T, e env, id, want string) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if st, err := Query(e.base, id); err == nil && st.State == want {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("session never reached state %q", want)
 }

@@ -38,3 +38,15 @@ func Open() (master, slave *os.File, err error) {
 	}
 	return m, s, nil
 }
+
+const tiocswinsz = 0x5414
+
+// SetSize sets the terminal's window size. The kernel delivers SIGWINCH to the foreground process group when
+// the size actually changes.
+func SetSize(f *os.File, cols, rows int) error {
+	ws := [4]uint16{uint16(rows), uint16(cols), 0, 0} // rows, columns, pixel width, pixel height
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), tiocswinsz, uintptr(unsafe.Pointer(&ws))); e != 0 {
+		return e
+	}
+	return nil
+}

@@ -39,8 +39,9 @@ type Server struct {
 	path string
 }
 
-// Listen binds path (0600). A live socket there means the session is already running; a stale file is replaced.
-func Listen(path string) (*Server, error) {
+// ListenUnix binds a unix socket at path (0600). A live socket there means the owner is already running; a
+// stale file is replaced. Used for the control socket and the attach socket.
+func ListenUnix(path string) (*net.UnixListener, error) {
 	if len(path) > maxPath {
 		return nil, fmt.Errorf("socket path %q is longer than %d bytes", path, maxPath)
 	}
@@ -55,6 +56,21 @@ func Listen(path string) (*Server, error) {
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		l.Close()
+		return nil, err
+	}
+	return l, nil
+}
+
+// PeerOK reports whether the process on the other end of c runs as the current user.
+func PeerOK(c *net.UnixConn) bool {
+	uid, err := peerUID(c)
+	return err == nil && int(uid) == os.Getuid()
+}
+
+// Listen binds path (0600) for control requests.
+func Listen(path string) (*Server, error) {
+	l, err := ListenUnix(path)
+	if err != nil {
 		return nil, err
 	}
 	return &Server{l: l, path: path}, nil
@@ -83,7 +99,7 @@ func (s *Server) Serve(h Handler) error {
 
 func serveConn(c *net.UnixConn, h Handler) {
 	defer c.Close()
-	if uid, err := peerUID(c); err != nil || int(uid) != os.Getuid() {
+	if !PeerOK(c) {
 		return // silently drop: not our user
 	}
 	c.SetDeadline(time.Now().Add(30 * time.Second))

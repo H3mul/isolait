@@ -97,6 +97,9 @@ func Dir(base, id string) string { return filepath.Join(base, id) }
 // SocketPath is the session's control socket.
 func SocketPath(base, id string) string { return filepath.Join(Dir(base, id), "control.sock") }
 
+// AttachPath is the session's attach socket: the framed terminal stream for attach and exec.
+func AttachPath(base, id string) string { return filepath.Join(Dir(base, id), "attach.sock") }
+
 // Create makes the runtime directory for a new session and returns its id. The id is reserved by the
 // directory itself (mkdir is atomic), so two concurrent starts cannot share one.
 func Create(base, workdir string) (id string, err error) {

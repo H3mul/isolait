@@ -82,6 +82,20 @@ M = [
      "./internal/term", "TestSanitizeTable|TestModesAreTracked", False, 60),
     ("M27", "internal/term/sanitize.go", "s.out = s.out[:0]\n\tfor _, b := range p {", "s.out = s.out[:0]\n\ts.st = gnd\n\tfor _, b := range p {",
      "./internal/term", "TestSplitReadsGiveTheSameOutput|TestRandomStreamsNeverLeakForbiddenSequences", False, 60),
+    ("M28", "internal/daemon/terminals.go", "\tif dst != nil {\n\t\tdst.send(attach.Frame{Type: attach.Data", "\tif dst == nil {\n\t\tselect {} // an unattended agent is no longer drained\n\t}\n\tif dst != nil {\n\t\tdst.send(attach.Frame{Type: attach.Data",
+     "./internal/daemon", "TestUnattendedAgentNeverBlocksOnOutput", False, 60),
+    ("M29", "internal/daemon/terminals.go", "if t.attached != nil {\n\t\tt.mu.Unlock()\n\t\tc.gate.Unlock()\n\t\tc.conn.SendJSON(attach.Hello, attach.Reply{Error: \"this session already", "if false {\n\t\tt.mu.Unlock()\n\t\tc.gate.Unlock()\n\t\tc.conn.SendJSON(attach.Hello, attach.Reply{Error: \"this session already",
+     "./internal/daemon", "TestSecondAgentClientIsRejected", False, 60),
+    ("M30", "internal/daemon/terminals.go", "if modes.AltScreen {", "if modes.AltScreen && false {",
+     "./internal/daemon", "TestDetachKeepsAgentRunningAndReattachRestoresModes", False, 60),
+    ("M31", "internal/daemon/terminals.go", "t.pump(c, p)\n\t// the client is gone (detach, closed terminal): an exec session does not outlive it\n\tt.cl.Signal(p.id, int(syscall.SIGHUP))\n\ttime.AfterFunc(2*time.Second, func() { t.cl.Signal(p.id, int(syscall.SIGKILL)) })", "t.pump(c, p)",
+     "./internal/daemon", "TestExecDoesNotOutliveItsClient", False, 60),
+    ("M32", "internal/daemon/terminals.go", "if !termRe.MatchString(termName) {", "if false {",
+     "./internal/daemon", "TestTermIsSanitizedAndSizeClamped", False, 60),
+    ("M33", "internal/daemon/terminals.go", "if cols < 1 || cols > 1000 {", "if false {",
+     "./internal/daemon", "TestTermIsSanitizedAndSizeClamped", False, 60),
+    ("M34", "internal/daemon/terminals.go", "dst.conn.SendJSON(attach.Exit, attach.ExitInfo{Code: e.Code, Signal: e.Signal})", "_ = e",
+     "./internal/daemon", "TestAgentExitIsReportedAndReattachRestartsIt", False, 60),
 ]
 
 

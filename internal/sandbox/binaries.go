@@ -27,11 +27,12 @@ type BinOptions struct {
 
 // Binaries is the resolved exposure: what to add to the plan, the sandbox PATH and what to tell the user.
 type Binaries struct {
-	Argv0    string       // the agent as started inside the sandbox (an absolute path)
-	PathDirs []string     // sandbox PATH entries, in order
-	Roots    []string     // host paths bound read-only, shown by `isolait status`
-	Entries  []plan.Entry // plan entries to add (dirs, read-only binds, the agent symlink)
-	Warnings []string
+	Argv0     string       // the agent's resolved path
+	AgentPath string       // the path to start it with inside the sandbox: the /isolait/bin link when there is one, so its name is kept
+	PathDirs  []string     // sandbox PATH entries, in order
+	Roots     []string     // host paths bound read-only, shown by `isolait status`
+	Entries   []plan.Entry // plan entries to add (dirs, read-only binds, the agent symlink)
+	Warnings  []string
 }
 
 // Path renders PathDirs as a PATH value.
@@ -61,12 +62,13 @@ func ResolveBinaries(o BinOptions) (Binaries, error) {
 	if err != nil {
 		return Binaries{}, fmt.Errorf("resolving %s: %w", agent, err)
 	}
-	b.Argv0 = resolved
+	b.Argv0, b.AgentPath = resolved, resolved
 	if !m.covers(resolved) {
 		root := installRoot(resolved)
 		b.bind(m, root)
 		name := filepath.Base(agent)
 		b.Entries = append(b.Entries, plan.Entry{Kind: plan.Symlink, Src: resolved, Dst: AgentLinkDir + "/" + name})
+		b.AgentPath = AgentLinkDir + "/" + name
 		b.PathDirs = append([]string{AgentLinkDir}, b.PathDirs...)
 	}
 

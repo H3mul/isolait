@@ -38,7 +38,7 @@ func RunFromFD() error {
 
 type sessionState struct {
 	mu       sync.Mutex
-	state    string
+	state    func() string // idle, detached or attached
 	spec     Spec
 	plan     *plan.Plan
 	bins     sandbox.Binaries
@@ -48,7 +48,7 @@ type sessionState struct {
 func (s *sessionState) status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := Status{ID: s.spec.ID, State: s.state, PID: os.Getpid(), Started: s.spec.Started, Workdir: s.spec.Workdir,
+	st := Status{ID: s.spec.ID, State: s.state(), PID: os.Getpid(), Started: s.spec.Started, Workdir: s.spec.Workdir,
 		Roots: s.bins.Roots, Ports: []int{}, EnvNames: s.envNames, Warnings: s.bins.Warnings}
 	if s.spec.LimitsNote != "" {
 		st.Limits = LimitsStatus{Reason: s.spec.LimitsNote}
@@ -133,7 +133,17 @@ func Run(spec Spec) error {
 	}
 	defer cl.Close()
 
-	st := &sessionState{state: "idle", spec: spec, plan: p, bins: bins}
+	argv := append([]string{bins.AgentPath}, spec.Agent[1:]...)
+	tm := newTerminals(cl, argv, env, dst)
+	defer tm.Close()
+	attachSrv, err := tm.Listen(session.AttachPath(spec.RuntimeBase, spec.ID))
+	if err != nil {
+		box.Kill()
+		return err
+	}
+	defer attachSrv.Close()
+
+	st := &sessionState{state: tm.State, spec: spec, plan: p, bins: bins}
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
 		st.envNames = append(st.envNames, k)
@@ -164,9 +174,6 @@ func Run(spec Spec) error {
 
 	select {
 	case <-stopping:
-		st.mu.Lock()
-		st.state = "stopping"
-		st.mu.Unlock()
 		cl.Shutdown()
 		select {
 		case <-exited:
