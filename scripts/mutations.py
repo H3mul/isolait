@@ -226,6 +226,9 @@ M = [
      "./internal/netd", "TestParsePorts", False, 60),
     ("M99", "internal/netd/ports.go", "if f.grants[port] != nil {\n\t\treturn nil\n\t}", "if false {\n\t\treturn nil\n\t}",
      "./internal/netd", "TestForwardingAndClosing", False, 60),
+    ("M100", "internal/sandbox/baseline.go", '"--cap-drop", "ALL", ', '', "./internal/daemon", "TestIsolationRegressionSuite", True, 120),
+    ("M101", "internal/sandbox/baseline.go", 'a = append(a, "--disable-userns")', '_ = a', "./internal/daemon", "TestIsolationRegressionSuite", True, 120),
+    ("M102", "internal/sandbox/baseline.go", ', "--unshare-net",', ',', "./internal/daemon", "TestIsolationRegressionSuite", True, 120),
 ]
 
 

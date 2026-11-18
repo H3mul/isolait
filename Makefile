@@ -1,7 +1,7 @@
 # Fast checks run everywhere; the security tier needs real user namespaces (see docs/security-tests.md).
 GO ?= go
 
-.PHONY: all build check test security canary mutations
+.PHONY: all build check test security canary mutations isolation e2e
 
 all: check test
 
@@ -29,3 +29,11 @@ canary:
 # apply every mutation in scripts/mutations.py to a scratch copy and require a test to fail
 mutations:
 	python3 scripts/mutations.py
+
+# the CI gate over the sandbox's core guarantees; fails if any of its tests was skipped
+isolation:
+	./scripts/isolation.sh
+
+# the whole user workflow (start, detach, attach, exec, mounts, ports, agent restart, stop) on the real kernel
+e2e:
+	$(GO) test -tags security -count=1 -v -run TestFullWorkflow ./internal/cli

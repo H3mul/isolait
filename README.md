@@ -248,6 +248,8 @@ Global and per-workspace TOML config, and the trust model for a repository's own
 make test        # fast tier: units, parsers, protocol, plan (no kernel features needed)
 make security    # also runs the sandbox on the real kernel (needs user namespaces and bwrap)
 make canary      # only the host-assumption canaries: run after a kernel, bwrap or systemd upgrade
+make isolation   # the CI gate over the sandbox's core guarantees (fails if any of its tests is skipped)
+make e2e         # the whole workflow through the real binary: start, attach, mounts, ports, restart, stop
 make mutations   # apply deliberate regressions to a scratch copy; every one must fail a test
 ```
 

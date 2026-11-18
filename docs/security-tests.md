@@ -13,9 +13,11 @@ row and its test in the same change.
 | `make test` | **fast tier** under `-race`: units, parsers, protocol, plan; no kernel features | every change |
 | `make security` | fast tier plus the **security tier** (`-tags security`): the real sandbox on the real kernel; tests `t.Skip` with a reason when a host feature is missing, never pass vacuously | every change where user namespaces work; CI |
 | `make canary` | only the **host-assumption canaries** (`internal/canary`) | after a kernel, bwrap or systemd upgrade, and in CI |
+| `make isolation` | the **isolation gate**: the curated tests for no capabilities, mounts, host paths, unapproved network, control-socket access and nested user namespaces; fails if any is skipped | CI gate; after any change to the sandbox, broker or network |
+| `make e2e` | `cli.TestFullWorkflow`: start, detach, attach, exec, mounts, ports, agent restart, stop through the real binary | before a release; CI; run on WSL2 and native Linux |
 | `make mutations` | applies every mutation below to a scratch copy and requires a test to fail | when you touch a guard test or a guarded line; before a release |
 
-CI (`.github/workflows/ci.yml`) runs `make check`, `make test`, `make security` and `make canary`; it lifts Ubuntu
+CI (`.github/workflows/ci.yml`) runs `make check`, `make test`, `make security`, `make canary` and, as a separate gate job, `make isolation` and `make e2e`; it lifts Ubuntu
 24.04's AppArmor userns restriction for the test run only. The workflow has not run on GitHub yet.
 
 **Canaries** are small tests of the kernel, bwrap and systemd behaviours the design depends on. They use bwrap and
@@ -90,6 +92,8 @@ line exists, its mutation in the same change.
 | 1.6 | The sandbox is held (`--block-fd`) after its namespaces exist and released only after the engine reports ready: no sandbox process runs before its network is hardened and up | Decision 5 (start order) | every daemon session test (the init shim answers only after release); `daemon.TestSandboxNetworkEndToEnd` | M86 | security |
 | 1.2, 1.9 | A hot mount is visible, `.isolait` is masked, a read-only mount is never writable and cannot be remounted; a protected path or any ancestor is refused by dev+inode (also through symlinks, and a path swapped for a symlink after validation); a busy mount is reported with its processes and `--force` detaches it; a mismatch with the plan after a change is rolled back | Decisions 2, 3, 5 | `mounts.TestDenyList*`, `TestOpenSourceDescriptorIsStable`, `daemon.TestHotMount*`, `TestRemoveBusyForcedAndSwitch`, `TestUnplannedMountIsRolledBack`, `cli.TestMountAndUnmountCommands` | M87 to M94 | fast and security |
 | 1.7 | A port grant is a listener on the sandbox loopback forwarded to host `127.0.0.1` only: refused before `allow` and after `deny`, live connections end on `deny`, a partial range closes only what is open, a service bound to a non-loopback host address is unreachable, UDP and oversized ranges are rejected | Decision 5 | `netd.TestParsePorts`, `TestForwardingAndClosing`, `daemon.TestPortGrant*`, `TestPortRangeGrantAndPartialClose`, `cli.TestAllowAndDenyPortCommands` | M95 to M99 | fast and security |
+| 1.3, 1.5, 1.7 | The isolation gate: from inside a live session no capabilities (effective and bounding sets empty, no_new_privs), mounting fails, a nested user namespace fails, only `lo` and the managed `tap0` exist, the host home, runtime, state and the control and attach sockets are invisible, host secrets are absent, uid is the caller's | Decisions 1, 4, 7 | `daemon.TestIsolationRegressionSuite` plus the tests named in `scripts/isolation.sh` | M100 to M102 | security (gate) |
+| workflow | The whole user workflow works in one sequence: start, detach, attach (agent state kept), exec, mount, port grant, agent exit and restart (mounts kept), unmount, stop leaves nothing | Spec: all | `cli.TestFullWorkflow` | n/a | security |
 | netlink | The rtnetlink messages (link up, address, default route) are well formed and kernel errors are parsed | Decision 5 | `netd.TestNetlinkMessagesAreWellFormed`, `TestAckErrorParsing` | n/a | fast |
 
 ## Host-assumption canaries
@@ -107,7 +111,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(99 of 99) on 2026-11-17.
+(102 of 102) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -210,6 +214,9 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M97 | UDP notation is not recognised as UDP | `netd.TestParsePorts` |
 | M98 | The per-grant port cap is off by one | same |
 | M99 | Opening an open port creates a second listener | `netd.TestForwardingAndClosing` |
+| M100 | The sandbox keeps its capabilities (`--cap-drop ALL` removed) | `daemon.TestIsolationRegressionSuite` |
+| M101 | Nested user namespaces are allowed (`--disable-userns` dropped) | same |
+| M102 | The sandbox shares the host's network namespace | same |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not
@@ -222,5 +229,4 @@ credential read, and the 0700 runtime directory is the primary defence).
 |---|---|---|---|---|
 | 1.6 | A real agent reaching its real API through the engine | Decision 5 | 5.6 (manual, `e2e.md`) | n/a |
 | 1.8 | A real Claude Code and OpenCode through the relay | Decision 4 | manual, `docs/manual-checks.md` | n/a |
-| 1.3 | No unapproved network from inside the sandbox (the control-surface half is done, see the matrix) | Decision 4 | 8.2 | the isolation regression suite |
 | S2 to S4 | Landlock ceiling | `sandbox-hardening` D2 and D3 | deferred to Phase 2 | S2 to S4 spikes remain in the store; revisit triggers in the design |

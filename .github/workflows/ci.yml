@@ -38,3 +38,23 @@ jobs:
       - run: make security
       - name: Canaries (host assumptions)
         run: make canary
+
+  # The isolation gate: the tests guarding "no capabilities, no mounts, no host paths, no unapproved network, no
+  # control-socket access, no nested user namespaces". It fails when a test skips, so a runner that cannot make
+  # user namespaces cannot turn the gate green. The same restriction lift and drivers as the security job.
+  isolation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Load the tun driver
+        run: sudo modprobe tun || true
+      - run: make isolation
+      - name: End-to-end workflow
+        run: make e2e
