@@ -79,6 +79,8 @@ line exists, its mutation in the same change.
 | 1.6 | At the engine: blocked destinations (private, metadata, CGNAT, host address, documentation) are refused without ever reaching the dialer; the gateway accepts only DNS; the connection limit holds and frees slots; the engine's own dialer enforces the policy at dial time | Decision 5; Spec: Private and local ranges blocked | `netd.TestBlockedDestinationsNeverReachTheDialer`, `TestGatewayAcceptsOnlyDNS`, `TestConnectionLimit`, `TestDefaultDialerRefusesLoopbackAtDialTime` | M67, M68, M72, M73 | fast |
 | 1.6 | DNS to the gateway over UDP and TCP is answered by the host resolver (a TCP guest gets a TCP upstream), the answer comes from the gateway so the host resolver's address is never exposed, malformed messages and responses are dropped without reaching the resolver, and a name whose answer is a private address resolves but the connection to it is refused | Spec: DNS resolution; Name resolving to a private address | `netd.TestDNSOverUDPIsAnsweredByTheHostResolver`, `TestDNSOverTCPIsAnswered`, `TestMalformedDNSIsDropped`, `TestNameResolvingToAPrivateAddressIsRefused`, `TestResolvConfParsing` | M71, M74 | fast |
 | 1.6 | Non-DNS UDP (to the gateway on another port, to a public address on 53 or any port) and ICMP echo are dropped and the stack never answers a ping for an address it does not own | Spec: Unsupported traffic dropped | `netd.TestNonDNSUDPIsDropped`, `TestICMPIsDropped` | M69, M70 | fast |
+| 1.6 | The network engine process has no mount authority: a seccomp filter denies the mount family (`mount`, `umount2`, `pivot_root`, `chroot`, `open_tree`, `move_mount`, `fsopen`/`fsconfig`/`fsmount`/`fspick`, `mount_setattr`), swap, reboot, kexec, module loading, ptrace, cross-process memory access, `unshare` and file-handle opening, on every thread including threads created later, while `setns` stays allowed; in the broker namespace `mount` works before the filter and is `EPERM` after it | Decision 5 (`netd` has no mount capability) | `harden.TestSeccompDeniesDangerousCallsOnEveryThread`, `TestKeepOnlyCapsAndNoMountAuthority`, `TestProgramLayout`, `TestEveryDeniedCallIsDistinctAndTheTableIsComplete` | M75, M76, M79 | fast + security |
+| 1.6 | The engine keeps exactly `CAP_NET_ADMIN` and `CAP_SYS_ADMIN` (effective, permitted and bounding), no inheritable or ambient capabilities, on every thread that already existed | Decision 5 | `harden.TestKeepOnlyCapsAndNoMountAuthority` | M77, M78 | security |
 
 ## Host-assumption canaries
 
@@ -95,7 +97,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(74 of 74) on 2026-11-17.
+(79 of 79) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -173,6 +175,11 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M72 | The connection limit is not enforced | `netd.TestConnectionLimit` |
 | M73 | The engine's dialer has no dial-time policy | `netd.TestDefaultDialerRefusesLoopbackAtDialTime` |
 | M74 | A TCP DNS query is sent upstream over UDP | `netd.TestDNSOverTCPIsAnswered` |
+| M75 | `mount` is missing from the seccomp denylist | `harden.TestKeepOnlyCapsAndNoMountAuthority` |
+| M76 | The filter is installed on the calling thread only | `harden.TestSeccompDeniesDangerousCallsOnEveryThread` |
+| M77 | Capabilities are dropped on the calling thread only | `harden.TestKeepOnlyCapsAndNoMountAuthority` |
+| M78 | The bounding set is not reduced | same |
+| M79 | The filter's default for denied calls is allow | `harden.TestProgramLayout`, `TestSeccompDeniesDangerousCallsOnEveryThread` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not

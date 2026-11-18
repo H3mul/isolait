@@ -176,6 +176,16 @@ M = [
      "./internal/netd", "TestDefaultDialerRefusesLoopbackAtDialTime", False, 90),
     ("M74", "internal/netd/dns.go", "resp, err := e.cfg.Upstream.Exchange(ctx, q, true)", "resp, err := e.cfg.Upstream.Exchange(ctx, q, false)",
      "./internal/netd", "TestDNSOverTCPIsAnswered", False, 90),
+    ("M75", "internal/harden/harden_amd64.go", "165, 166, 155, 161, // mount", "166, 155, 161, // mount",
+     "./internal/harden", "TestKeepOnlyCapsAndNoMountAuthority", True, 90),
+    ("M76", "internal/harden/harden.go", "seccompFilterTsync   = 1", "seccompFilterTsync   = 0",
+     "./internal/harden", "TestSeccompDeniesDangerousCallsOnEveryThread", False, 90),
+    ("M77", "internal/harden/harden.go", "syscall.AllThreadsSyscall(syscall.SYS_CAPSET", "syscall.Syscall(syscall.SYS_CAPSET",
+     "./internal/harden", "TestKeepOnlyCapsAndNoMountAuthority", True, 90),
+    ("M78", "internal/harden/harden.go", "for c := 0; c < 64; c++ {", "for c := 0; c < 0; c++ {",
+     "./internal/harden", "TestKeepOnlyCapsAndNoMountAuthority", True, 90),
+    ("M79", "internal/harden/harden.go", "sockFilter{Code: bpfRet, K: retErrnoBase | uint32(syscall.EPERM)}", "sockFilter{Code: bpfRet, K: retAllow}",
+     "./internal/harden", "TestProgramLayout|TestSeccompDeniesDangerousCallsOnEveryThread", False, 90),
 ]
 
 
