@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,5 +229,34 @@ func TestKillServer(t *testing.T) {
 	}
 	if _, err := run(t, d, "kill-server", "extra"); err == nil {
 		t.Error("kill-server takes no arguments")
+	}
+}
+
+// Every command is explorable: missing arguments print the help (exit 0, like a command group), a wrong count or an
+// unknown subcommand says what to run next.
+func TestMisusePrintsHelp(t *testing.T) {
+	d, _ := testDeps(t)
+	for _, args := range [][]string{{"allow"}, {"deny"}, {"allow", "port"}, {"deny", "port"}, {"mount"}, {"unmount"}, {"exec"}} {
+		out, err := run(t, d, args...)
+		var ee *ExitError
+		if err != nil && !(errors.As(err, &ee) && ee.Code == 0) {
+			t.Errorf("%v: want help and success, got %v", args, err)
+		}
+		if !strings.Contains(out, "Usage:") {
+			t.Errorf("%v printed no help:\n%s", args, out)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"mount", "a", "b"}, "usage: isolait mount"},
+		{[]string{"allow", "nonsense"}, "run 'isolait allow --help'"},
+		{[]string{"deny", "port", "1", "2"}, "usage: isolait deny port"},
+	} {
+		_, err := run(t, d, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v: want an error containing %q, got %v", tc.args, tc.want, err)
+		}
 	}
 }

@@ -52,7 +52,40 @@ func rootWith(d deps) *cobra.Command {
 	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(d.paths), initCmd(), netdCmd())
 	root.AddCommand(sessionCmds(d)...)
 	root.PersistentFlags().String("sid", "", "target this session instead of the most recently used one")
+	helpWhenMisused(root)
 	return root
+}
+
+// helpWhenMisused makes every command explorable: a command that needs arguments and gets none prints its help
+// (like a command group does) and exits 0; a wrong number of arguments, or an unknown subcommand, names the
+// usage and where to find the help instead of a bare error.
+func helpWhenMisused(c *cobra.Command) {
+	for _, sub := range c.Commands() {
+		helpWhenMisused(sub)
+	}
+	switch {
+	case c.HasSubCommands() && !c.Runnable() && c.HasParent():
+		// a command group: no argument prints its help, an unknown subcommand says where to look (the root keeps cobra's own check)
+		c.RunE = func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			return fmt.Errorf("unknown command %q for %q\nrun '%s --help' to see the commands", args[0], cmd.CommandPath(), cmd.CommandPath())
+		}
+	case c.Runnable() && c.Args != nil:
+		check := c.Args
+		c.Args = func(cmd *cobra.Command, args []string) error {
+			err := check(cmd, args)
+			switch {
+			case err == nil:
+				return nil
+			case len(args) == 0:
+				cmd.Help()
+				return &ExitError{Code: 0}
+			}
+			return fmt.Errorf("%w\nusage: %s\nrun '%s --help' for details", err, cmd.UseLine(), cmd.CommandPath())
+		}
+	}
 }
 
 func versionCmd() *cobra.Command {

@@ -66,6 +66,10 @@ before the agent command:
 `start` refuses `/`, your home directory and any directory that contains or sits inside isolait's own config,
 state or runtime directory.
 
+### Exploring the commands
+
+Every command prints its help when you run it without the arguments it needs (`isolait allow`, `isolait mount`, `isolait deny port`, `isolait exec` all do, with exit status 0); a wrong number of arguments or an unknown subcommand prints the usage line and the `--help` hint with exit status 1. `isolait --help` lists everything.
+
 ### Targeting a session
 
 `attach`, `exec`, `list`, `status` and `stop` take a session id (`isolait stop <sid>`), or `--sid <sid>`. Without
