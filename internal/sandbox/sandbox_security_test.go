@@ -36,6 +36,7 @@ type job struct {
 	AllowUserns bool
 	Workspace   *workspace
 	Bin         *BinOptions
+	SysDirs     []string // extra directories treated as system directories (a wrapper that lives in one)
 	InitScripts []string // run the init shim as PID 1 and spawn each script in turn
 	Tamper      string   // "extra-bind" or "no-ro": inject a bwrap misconfiguration the mount check must catch
 	ScopePids   int      // run the whole session in a systemd user scope with this TasksMax
@@ -108,6 +109,7 @@ func helper() {
 		exe, _ := os.Executable()
 		j.Spec.InitExe, _ = filepath.EvalSymlinks(exe)
 	}
+	SystemDirs = append(append([]string{}, j.SysDirs...), SystemDirs...)
 	base := map[string]string{"HOME": j.Spec.HostHome, "PATH": "/usr/bin:/bin"}
 	var bins Binaries
 	if j.Bin != nil {
@@ -433,6 +435,40 @@ echo otherdir=$([ -e ` + other + ` ] && echo visible || echo absent)
 	kv = runJob(t, j)
 	if !strings.Contains(kv["other"], "other-ran") {
 		t.Errorf("--inherit-path did not expose the allowed directory: %q", kv["other"])
+	}
+}
+
+// 1.3: a wrapper in a system-looking (already mounted) directory that execs a binary in a non-system directory
+// runs by name, and the binary's directory is the only extra exposure.
+func TestLauncherInSystemDirRunsInSandbox(t *testing.T) {
+	// not under /tmp: the sandbox mounts its own tmpfs there, which would shadow these binds
+	root, err := os.MkdirTemp("/var/tmp", "isolait-launcher-")
+	if err != nil {
+		t.Skipf("no /var/tmp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	root, _ = filepath.EvalSymlinks(root)
+	sys := filepath.Join(root, "sys")
+	bin := filepath.Join(root, "opt/tool/bin/real")
+	must(t, os.MkdirAll(filepath.Dir(bin), 0o755))
+	must(t, os.WriteFile(bin, []byte("#!/bin/sh\necho real-ran $*\n"), 0o755))
+	must(t, os.WriteFile(filepath.Join(root, "opt/tool/bin/sibling"), []byte("#!/bin/sh\n"), 0o755))
+	must(t, os.MkdirAll(filepath.Join(sys, "bin"), 0o755))
+	must(t, os.WriteFile(filepath.Join(sys, "bin/wrapped"), []byte("#!/bin/sh\nexec "+bin+" \"$@\"\n"), 0o755))
+
+	j := baseJob()
+	j.Script = `
+echo run=$(` + filepath.Join(sys, "bin/wrapped") + ` a b 2>&1)
+echo sibling=$([ -e ` + filepath.Join(root, "opt/tool/bin/sibling") + ` ] && echo visible || echo absent)
+`
+	j.SysDirs = []string{sys}
+	j.Bin = &BinOptions{Agent: "wrapped", HostPath: filepath.Join(sys, "bin") + ":/usr/bin", Home: root}
+	kv := runJob(t, j)
+	if kv["run"] != "real-ran a b" {
+		t.Errorf("the launcher's target does not run in the sandbox: %q", kv["run"])
+	}
+	if kv["sibling"] != "absent" { // generic bin directory: only the file itself is bound
+		t.Error("the launcher target's whole bin directory is exposed")
 	}
 }
 

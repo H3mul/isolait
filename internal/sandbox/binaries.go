@@ -24,7 +24,7 @@ type BinOptions struct {
 	// InheritPrefixes overrides where --inherit-path may take directories from (tests); default /usr/local, /opt, Home.
 	InheritPrefixes []string
 	// Deny, when set, vets the directory of each launcher target before it is bound (the mount deny list).
-	Deny func(dir string) error
+	Deny func(dir string) error `json:"-"`
 }
 
 // Binaries is the resolved exposure: what to add to the plan, the sandbox PATH and what to tell the user.

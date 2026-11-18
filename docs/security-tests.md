@@ -217,6 +217,7 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M100 | The sandbox keeps its capabilities (`--cap-drop ALL` removed) | `daemon.TestIsolationRegressionSuite` |
 | M101 | Nested user namespaces are allowed (`--disable-userns` dropped) | same |
 | M102 | The sandbox shares the host's network namespace | same |
+| M103 | Launcher scripts' targets are not exposed (a wrapper in a system directory cannot run its binary) | `sandbox.TestLauncherInSystemDirRunsInSandbox` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not

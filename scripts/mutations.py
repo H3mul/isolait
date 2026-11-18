@@ -229,6 +229,8 @@ M = [
     ("M100", "internal/sandbox/baseline.go", '"--cap-drop", "ALL", ', '', "./internal/daemon", "TestIsolationRegressionSuite", True, 120),
     ("M101", "internal/sandbox/baseline.go", 'a = append(a, "--disable-userns")', '_ = a', "./internal/daemon", "TestIsolationRegressionSuite", True, 120),
     ("M102", "internal/sandbox/baseline.go", ', "--unshare-net",', ',', "./internal/daemon", "TestIsolationRegressionSuite", True, 120),
+    ("M103", "internal/sandbox/binaries.go", "for _, t := range launcherTargets(resolved) {", "for _, t := range launcherTargets(resolved)[:0] {",
+     "./internal/sandbox", "TestLauncherInSystemDirRunsInSandbox", True, 120),
 ]
 
 
