@@ -1,7 +1,7 @@
 # isolait
 
-Run AI coding agents (Claude Code, OpenCode, ...) in a rootless, zero-trust sandbox on Linux and WSL2. The
-sandbox starts instantly, needs no root, no VM and no container runtime, and every permission the agent has is
+Run AI coding agents, tools, processes (Claude Code, OpenCode, ...) or anything else in a rootless, zero-trust sandbox on Linux.
+The sandbox starts instantly, needs no root, no VM and no container runtime, and every permission the agent has is
 an explicit, user-granted, revocable grant.
 
 ## Why another AI sandbox
