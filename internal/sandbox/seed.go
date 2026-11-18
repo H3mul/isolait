@@ -37,8 +37,16 @@ PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
 
 // SeedHome creates the files of skel (the embedded set when skel has none) that are missing from home.
 // Existing files are never touched and nothing is read from the user's real home.
+// A skeleton is a few dotfiles. Some systems (CI images) put whole toolchains in /etc/skel, so files over
+// maxSeedFile are skipped and copying stops after maxSeedTotal bytes: starting a session must not read hundreds of MB.
+const (
+	maxSeedFile  = 1 << 20
+	maxSeedTotal = 8 << 20
+)
+
 func SeedHome(home, skel string) error {
 	found := false
+	total := int64(0)
 	err := filepath.WalkDir(skel, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if p == skel {
@@ -56,6 +64,11 @@ func SeedHome(home, skel string) error {
 			return os.MkdirAll(dst, 0o755)
 		case d.Type().IsRegular():
 			found = true
+			if fi, err := d.Info(); err != nil || fi.Size() > maxSeedFile {
+				return nil
+			} else if total += fi.Size(); total > maxSeedTotal {
+				return filepath.SkipAll
+			}
 			b, err := os.ReadFile(p)
 			if err != nil {
 				return err

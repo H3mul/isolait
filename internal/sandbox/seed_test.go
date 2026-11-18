@@ -82,3 +82,20 @@ func TestSeedHome(t *testing.T) {
 		}
 	})
 }
+
+func TestSeedSkipsHugeSkeletonFiles(t *testing.T) {
+	skel, home := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(skel, ".bashrc"), "small\n", 0o644)
+	if err := os.WriteFile(filepath.Join(skel, "huge"), make([]byte, maxSeedFile+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedHome(home, skel); err != nil {
+		t.Fatal(err)
+	}
+	if readFile(t, filepath.Join(home, ".bashrc")) != "small\n" {
+		t.Error("the small file was not seeded")
+	}
+	if _, err := os.Stat(filepath.Join(home, "huge")); err == nil {
+		t.Error("a file over the size cap was copied")
+	}
+}

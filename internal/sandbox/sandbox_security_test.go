@@ -827,8 +827,12 @@ func TestDeveloperToolsRunUnderTheFilter(t *testing.T) {
 	}
 	kv := runJob(t, job{Script: script.String(), SysDirs: nil})
 	for _, tool := range present {
-		if kv[tool] != "0" {
-			t.Errorf("%s exited %q under the filter (127 = not visible in the sandbox, anything else = denied call?)", tool, kv[tool])
+		switch kv[tool] {
+		case "0":
+		case "127": // installed on the host outside the directories the sandbox exposes (CI toolcache, /opt): not a filter result
+			t.Logf("skipped %s: not visible in the sandbox", tool)
+		default:
+			t.Errorf("%s exited %q under the filter: a denied call?", tool, kv[tool])
 		}
 	}
 }
