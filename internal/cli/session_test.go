@@ -204,3 +204,29 @@ func TestPromptRunnerTargetsTheCurrentSessionAndRefusesAttaching(t *testing.T) {
 		t.Errorf("an empty line: %q", out)
 	}
 }
+
+func TestKillServer(t *testing.T) {
+	d, base := testDeps(t)
+	if out, err := run(t, d, "kill-server"); err != nil || strings.TrimSpace(out) != "no sessions running" {
+		t.Fatalf("with none running: %v %q", err, out)
+	}
+	var ids []string
+	for _, w := range []string{"/work/a", "/work/b", "/work/c"} {
+		ids = append(ids, fakeSession(t, base, w))
+	}
+	out, err := run(t, d, "kill-server")
+	if err != nil {
+		t.Fatalf("kill-server: %v\n%s", err, out)
+	}
+	for _, id := range ids {
+		if !strings.Contains(out, "stopped "+id) {
+			t.Errorf("%s not reported stopped:\n%s", id, out)
+		}
+	}
+	if out, _ = run(t, d, "list"); !strings.Contains(out, "no sessions running") {
+		t.Errorf("sessions left: %q", out)
+	}
+	if _, err := run(t, d, "kill-server", "extra"); err == nil {
+		t.Error("kill-server takes no arguments")
+	}
+}

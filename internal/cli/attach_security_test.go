@@ -352,3 +352,32 @@ func TestCommandsFollowTheMostRecentSession(t *testing.T) {
 		t.Fatalf("nothing running: %v\n%s", err, out)
 	}
 }
+
+// 4.1: kill-server ends every session through the real binary, and is a no-op that succeeds with none.
+func TestKillServerEndToEnd(t *testing.T) {
+	e := newE2E(t)
+	if out, err := e.plain("kill-server"); err != nil || !strings.Contains(out, "no sessions running") {
+		t.Fatalf("with none: %v\n%s", err, out)
+	}
+	var ids []string
+	for i := 0; i < 3; i++ {
+		out, err := e.plain("start", "-d", "sh", "-c", "sleep 300")
+		e.requireSandbox(out, err)
+		if err != nil {
+			t.Fatalf("start: %v\n%s", err, out)
+		}
+		ids = append(ids, sidRe.FindString(out))
+	}
+	out, err := e.plain("kill-server")
+	if err != nil {
+		t.Fatalf("kill-server: %v\n%s", err, out)
+	}
+	for _, id := range ids {
+		if !strings.Contains(out, "stopped "+id) {
+			t.Errorf("%s not reported:\n%s", id, out)
+		}
+	}
+	if out, _ := e.plain("list"); !strings.Contains(out, "no sessions running") {
+		t.Errorf("sessions remain:\n%s", out)
+	}
+}

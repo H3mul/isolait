@@ -126,6 +126,8 @@ M = [
      "./internal/daemon", "TestResolveTargetFollowsTmuxSequence|TestListOrdersByRecency", False, 90),
     ("M105", "internal/daemon/client.go", "case forAttach && unattached != \"\":", "case false && unattached != \"\":",
      "./internal/daemon", "TestAttachPrefersTheNewestUnattachedSession", False, 90),
+    ("M106", "internal/daemon/client.go", "	es, _ := List(base)\n	for _, e := range es {\n		if err := Stop(", "	es, _ := List(base)\n	for _, e := range es[:min(1, len(es))] {\n		if err := Stop(",
+     "./internal/cli", "TestKillServer", False, 90),
     ("M48", "internal/cli/attach.go", "\t\tif code := exitStatus(res.Exit); code != 0 {\n\t\t\treturn &ExitError{Code: code}\n\t\t}\n\tcase res.Exit != nil:\n\t\tif code", "\tcase res.Exit != nil:\n\t\tif code",
      "./internal/cli", "TestStartAttachDetachReattachExit", True, 120),
     ("M49", "internal/cli/attach.go", "\tcase res.Exit != nil:\n\t\tif code := exitStatus(res.Exit); code != 0 {\n\t\t\treturn &ExitError{Code: code}\n\t\t}\n\tdefault:", "\tcase res.Exit != nil:\n\tdefault:",

@@ -198,7 +198,8 @@ directory, is refused. Limits: a launcher that builds its target from a variable
 [config](docs/config.md), otherwise the agent exits with status 127.
 
 Sessions live as long as their init process. They have no idle timeout, and the agent exiting does not end the
-session. `isolait stop` ends it and releases every process, mount and runtime file; the agent's persistent home
+session. `isolait stop` ends it, and `isolait kill-server` ends every session (it prints each id, says
+`no sessions running` and succeeds when there are none, and fails only if a session could not be stopped); either releases every process, mount and runtime file; the agent's persistent home
 is kept.
 
 ## Letting the agent reach a service on your machine

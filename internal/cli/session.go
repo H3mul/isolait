@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -36,7 +37,7 @@ func agentOrShell(args []string) []string {
 }
 
 func sessionCmds(d deps) []*cobra.Command {
-	return []*cobra.Command{startCmd(d), attachCmd(d), execCmd(d), listCmd(d), statusCmd(d), stopCmd(d), mountCmd(d), unmountCmd(d), allowCmd(d), denyCmd(d), daemonCmd(), spawnCmd()}
+	return []*cobra.Command{startCmd(d), attachCmd(d), execCmd(d), listCmd(d), statusCmd(d), stopCmd(d), killServerCmd(d), mountCmd(d), unmountCmd(d), allowCmd(d), denyCmd(d), daemonCmd(), spawnCmd()}
 }
 
 // target resolves the session a command acts on: a positional id, else --sid, else the most recently used.
@@ -140,6 +141,28 @@ func stopCmd(d deps) *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "stopped %s\n", id)
 			return nil
+		},
+	}
+}
+
+func killServerCmd(d deps) *cobra.Command {
+	return &cobra.Command{
+		Use: "kill-server", Short: "Stop every session", Args: cobra.NoArgs,
+		Long: "Stops all running sessions and sweeps stale ones, printing each id stopped. With no session running it prints\n" +
+			"\"no sessions running\" and succeeds; it fails only if a session could not be stopped.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base, err := d.runtime()
+			if err != nil {
+				return err
+			}
+			stopped, errs := daemon.StopAll(base)
+			for _, id := range stopped {
+				fmt.Fprintf(cmd.OutOrStdout(), "stopped %s\n", id)
+			}
+			if len(stopped) == 0 && len(errs) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "no sessions running")
+			}
+			return errors.Join(errs...)
 		},
 	}
 }

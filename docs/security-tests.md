@@ -164,6 +164,7 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M47 | Attach is not recorded as use (the session's recency is not updated) | `daemon.TestAttachAndDetachRecordUseButExecDoesNot` |
 | M104 | Sessions are not ordered by recency (targeting and `list` ignore it) | `daemon.TestResolveTargetFollowsTmuxSequence`, `daemon.TestListOrdersByRecency` |
 | M105 | `attach` does not prefer an unattached session | `daemon.TestAttachPrefersTheNewestUnattachedSession` |
+| M106 | `kill-server` stops only one of several sessions | `cli.TestKillServer`, `cli.TestKillServerEndToEnd` |
 | M48 | The agent's exit status is not propagated | same |
 | M49 | An exec'd process's exit status is not propagated | `cli.TestExecOnATerminal` |
 | M50 | `start` on a terminal does not attach | `cli.TestStartAttachDetachReattachExit` |

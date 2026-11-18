@@ -283,6 +283,20 @@ func Stop(base, id string) error {
 	return nil
 }
 
+// StopAll stops every session (stale ones are swept by List first) and returns the ids it stopped and one
+// error per session it could not stop.
+func StopAll(base string) (stopped []string, errs []error) {
+	es, _ := List(base)
+	for _, e := range es {
+		if err := Stop(base, e.ID); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", e.ID, err))
+			continue
+		}
+		stopped = append(stopped, e.ID)
+	}
+	return stopped, errs
+}
+
 var errNoSuchSession = errors.New("no such session")
 
 // ResolveTarget picks the session a command acts on, like tmux: --sid, else the most recently used live
