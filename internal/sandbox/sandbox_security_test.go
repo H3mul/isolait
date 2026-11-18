@@ -36,6 +36,7 @@ type job struct {
 	AllowUserns bool
 	Workspace   *workspace
 	Bin         *BinOptions
+	SeedHome    bool     // seed the agent home from the embedded skeleton, as the daemon does
 	SysDirs     []string // extra directories treated as system directories (a wrapper that lives in one)
 	InitScripts []string // run the init shim as PID 1 and spawn each script in turn
 	Tamper      string   // "extra-bind" or "no-ro": inject a bwrap misconfiguration the mount check must catch
@@ -110,6 +111,12 @@ func helper() {
 		j.Spec.InitExe, _ = filepath.EvalSymlinks(exe)
 	}
 	SystemDirs = append(append([]string{}, j.SysDirs...), SystemDirs...)
+	if j.SeedHome {
+		if err := SeedHome(j.Spec.AgentHome, "/nonexistent-skel"); err != nil {
+			fail(err)
+			return
+		}
+	}
 	base := map[string]string{"HOME": j.Spec.HostHome, "PATH": "/usr/bin:/bin"}
 	var bins Binaries
 	if j.Bin != nil {
@@ -469,6 +476,21 @@ echo sibling=$([ -e ` + filepath.Join(root, "opt/tool/bin/sibling") + ` ] && ech
 	}
 	if kv["sibling"] != "absent" { // generic bin directory: only the file itself is bound
 		t.Error("the launcher target's whole bin directory is exposed")
+	}
+}
+
+// 2.2: a fresh agent home gives bash a prompt and history settings from the seeded skeleton.
+func TestSeededHomeGivesBashAPrompt(t *testing.T) {
+	j := baseJob()
+	j.SeedHome = true
+	j.Script = `
+echo rc=$([ -f "$HOME/.bashrc" ] && echo present || echo absent)
+echo hc=$(bash -ic 'echo $HISTCONTROL' 2>/dev/null)
+echo ps1=$(bash -ic 'echo "$PS1"' 2>/dev/null | head -c 20)
+`
+	kv := runJob(t, j)
+	if kv["rc"] != "present" || kv["hc"] != "ignoreboth" || kv["ps1"] == "" {
+		t.Errorf("seeded home: %v", kv)
 	}
 }
 

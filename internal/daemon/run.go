@@ -95,6 +95,9 @@ func Run(spec Spec) error {
 			return err
 		}
 	}
+	if err := sandbox.SeedHome(home, sandbox.SkelDir); err != nil {
+		return fmt.Errorf("seeding the agent home: %w", err)
+	}
 	if err := syscall.Mount("tmpfs", stage, "tmpfs", 0, "mode=0755"); err != nil {
 		return fmt.Errorf("mounting the stage: %w", err)
 	}
