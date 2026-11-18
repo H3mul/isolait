@@ -96,6 +96,16 @@ M = [
      "./internal/daemon", "TestTermIsSanitizedAndSizeClamped", False, 60),
     ("M34", "internal/daemon/terminals.go", "dst.conn.SendJSON(attach.Exit, attach.ExitInfo{Code: e.Code, Signal: e.Signal})", "_ = e",
      "./internal/daemon", "TestAgentExitIsReportedAndReattachRestartsIt", False, 60),
+    ("M35", "internal/term/input.go", "case f.inPaste:\n\t\t\tf.dest(b)\n\t\tcase f.inPrompt:", "case f.inPrompt:",
+     "./internal/term", "TestLeaderInsidePasteIsNeverRecognised|TestRandomPastesNeverTriggerTheLeader", False, 60),
+    ("M36", "internal/term/input.go", "if f.agentPaste && !f.inPrompt {\n\t\t\tf.addData(EvData, pasteEnd...)", "if !f.inPrompt {\n\t\t\tf.addData(EvData, pasteEnd...)",
+     "./internal/term", "TestLeaderInsidePasteIsNeverRecognised", False, 60),
+    ("M37", "internal/term/input.go", "f.events = f.events[:0]\n\tif len(f.held) > 0 {", "f.events = f.events[:0]\n\tif false && len(f.held) > 0 {",
+     "./internal/term", "TestLoneEscapeIsReleasedByFlush", False, 60),
+    ("M38", "internal/term/input.go", "case f.leader:\n\t\t\t\tf.addData(EvData, f.leader) // leader twice sends one literal leader byte", "case f.leader:",
+     "./internal/term", "TestLeaderCommands", False, 60),
+    ("M39", "internal/term/input.go", "f.afterLead = false // the leader was not followed by a command: a paste cancels it\n\tf.inPaste = true", "f.inPaste = true",
+     "./internal/term", "TestPasteCancelsAPendingLeader", False, 60),
 ]
 
 

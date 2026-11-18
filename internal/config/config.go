@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/H3mul/isolait/internal/term"
 	toml "github.com/pelletier/go-toml/v2"
 )
 
@@ -115,7 +116,6 @@ func extend(base, add []string) []string {
 }
 
 var (
-	leaderRe = regexp.MustCompile(`^ctrl-[\x21-\x7e]$`)
 	memoryRe = regexp.MustCompile(`^([1-9][0-9]*[KMGT]?|[1-9][0-9]?%|100%)$`)
 	cpuRe    = regexp.MustCompile(`^[1-9][0-9]{0,4}%$`)
 	envRe    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -150,8 +150,10 @@ func Parse(src string, data []byte) (Layer, error) {
 
 func (l Layer) validate(src string) error {
 	bad := func(key, why string) error { return fmt.Errorf("%s: key %q: %s", src, key, why) }
-	if l.Leader != nil && !leaderRe.MatchString(*l.Leader) {
-		return bad("leader", `must look like "ctrl-\" (ctrl- plus one printable character)`)
+	if l.Leader != nil {
+		if _, err := term.ParseLeader(*l.Leader); err != nil {
+			return bad("leader", err.Error())
+		}
 	}
 	for _, t := range l.Tools {
 		if !filepath.IsAbs(t) || filepath.Clean(t) != t {

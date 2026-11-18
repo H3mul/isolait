@@ -15,7 +15,7 @@ is read: never sub-directories, never directories added later with `isolait moun
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `leader` | string | `ctrl-\` | Leader key: `ctrl-` plus one printable character |
+| `leader` | string | `ctrl-\` | Leader key: `ctrl-` plus a letter or one of `@ \ ] ^ _`; Escape, Enter, Tab, Backspace, Ctrl-C and Ctrl-D are refused |
 | `tools` | list of paths | none | Extra read-only tool roots; clean absolute paths |
 | `env` | list of names | none | Host environment variables forwarded into the sandbox |
 | `inherit_env` | bool | `false` | Forward the whole host environment (opt-in, discouraged) |

@@ -39,6 +39,8 @@ func TestParseErrorsNameFileAndKey(t *testing.T) {
 		{"wrong type", "max_port_range = \"many\"\n", `cfg: key "max_port_range"`},
 		{"range", "max_port_range = 0\n", `cfg: key "max_port_range"`},
 		{"leader", "leader = \"F5\"\n", `cfg: key "leader"`},
+		{"leader without a control byte", "leader = \"ctrl-1\"\n", `cfg: key "leader"`},
+		{"leader that is Escape", "leader = \"ctrl-[\"\n", `cfg: key "leader"`},
 		{"relative tool", "tools = [\"bin\"]\n", `cfg: key "tools"`},
 		{"unclean tool", "tools = [\"/opt/../etc\"]\n", `cfg: key "tools"`},
 		{"env name", "env = [\"A=B\"]\n", `cfg: key "env"`},

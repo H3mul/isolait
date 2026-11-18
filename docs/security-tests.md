@@ -65,6 +65,7 @@ line exists, its mutation in the same change.
 | hardening | `exec` runs a new process on its own PTY in the same sandbox, resolves commands on the sandbox PATH, never outlives its client, and does not change the agent's state; hellos are validated (mode, command, TERM replaced when it is not a safe name, window size clamped) | Spec: Exec in a running sandbox | `daemon.TestExecRunsInTheSandboxAndReportsExit`, `TestExecDoesNotOutliveItsClient`, `TestExecOfAMissingCommandIsRefused`, `TestBadHellosAreRefused`, `TestTermIsSanitizedAndSizeClamped` | M31, M32, M33 | fast |
 | 1.3 | On the real kernel: attach and exec reach shells inside the sandbox (cwd `/workspaces/<name>`, the fake home, the user's uid, a real tty, the requested size); a second shell sees the same mounts; **nothing in the sandbox can find or reach the daemon's control or attach sockets**; detach and reattach return to the same shell | Spec: Control surface unreachable from sandbox | `daemon.TestAttachAndExecInTheRealSandbox` | stop mounting the runtime dir into the plan (covered by `sandbox.TestIsolaitDirsNeverExposed`); drop the sandbox | security |
 | hardening | The attach frame protocol: round trip of every frame type, oversized and truncated frames rejected | Decision 4 | `attach.TestFramesRoundTrip`, `TestOversizedAndTruncatedFramesAreRejected` | n/a | fast |
+| 1.8 | The leader key is recognised only from real keyboard input: never inside a bracketed paste (also not when pasting into the prompt), a paste cancels a pending leader, paste markers are stripped unless the agent asked for them, a lone Escape is released by `Flush` and not delayed for ever, input split at any byte boundary gives the same decisions, random paste traffic never produces a detach or prompt | Spec: Leader key from real input only | `term.TestLeaderCommands`, `TestLeaderInsidePasteIsNeverRecognised`, `TestPasteIntoThePromptGoesToThePrompt`, `TestPasteCancelsAPendingLeader`, `TestLoneEscapeIsReleasedByFlush`, `TestSplitInputGivesTheSameEvents`, `TestRandomPastesNeverTriggerTheLeader`, `TestParseLeader` | M35 to M39 | fast |
 
 ## Host-assumption canaries
 
@@ -81,7 +82,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(34 of 34) on 2026-11-17.
+(39 of 39) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -119,6 +120,11 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M32 | `TERM` from the client is passed on unchecked | `daemon.TestTermIsSanitizedAndSizeClamped` |
 | M33 | Window size from the client is not clamped | `daemon.TestTermIsSanitizedAndSizeClamped` |
 | M34 | The exit frame is never sent | `daemon.TestAgentExitIsReportedAndReattachRestartsIt` |
+| M35 | The leader key is recognised inside a bracketed paste | `term.TestLeaderInsidePasteIsNeverRecognised`, `TestRandomPastesNeverTriggerTheLeader` |
+| M36 | Paste markers forwarded to an agent that did not ask for them | `term.TestLeaderInsidePasteIsNeverRecognised` |
+| M37 | A held lone Escape is never released | `term.TestLoneEscapeIsReleasedByFlush` |
+| M38 | Leader twice does not send a literal leader | `term.TestLeaderCommands` |
+| M39 | A paste does not cancel a pending leader | `term.TestPasteCancelsAPendingLeader` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not
