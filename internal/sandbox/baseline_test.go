@@ -11,7 +11,7 @@ import (
 
 func testSpec() Spec {
 	return Spec{HostHome: "/home/fake", AgentHome: "/state/homes/agent", Stage: "/run/rt/stage", UID: 1000, GID: 1000,
-		Env: []string{"HOME=/home/fake", "PATH=/usr/bin"}}
+		Env: []string{"HOME=/home/fake", "LANG=C.UTF-8", "PATH=/usr/bin"}}
 }
 
 func TestHardeningFlags(t *testing.T) {
@@ -110,12 +110,12 @@ func TestBuildEnv(t *testing.T) {
 		inherit bool
 		want    []string
 	}{
-		{"default: secrets absent", nil, false, []string{"HOME=/home/fake", "PATH=/usr/bin"}},
-		{"declared variable", []string{"FOO"}, false, []string{"FOO=bar", "HOME=/home/fake", "PATH=/usr/bin"}},
-		{"declared but unset on host", []string{"NOPE"}, false, []string{"HOME=/home/fake", "PATH=/usr/bin"}},
-		{"explicit agent socket", []string{"SSH_AUTH_SOCK"}, false, []string{"HOME=/home/fake", "PATH=/usr/bin", "SSH_AUTH_SOCK=/run/agent"}},
-		{"inherit drops agent sockets", nil, true, []string{"AWS_SECRET_ACCESS_KEY=s3cret", "EMPTY=", "FOO=bar", "HOME=/home/fake", "PATH=/usr/bin"}},
-		{"inherit plus explicit socket", []string{"SSH_AUTH_SOCK"}, true, []string{"AWS_SECRET_ACCESS_KEY=s3cret", "EMPTY=", "FOO=bar", "HOME=/home/fake", "PATH=/usr/bin", "SSH_AUTH_SOCK=/run/agent"}},
+		{"default: secrets absent", nil, false, []string{"HOME=/home/fake", "LANG=C.UTF-8", "PATH=/usr/bin"}},
+		{"declared variable", []string{"FOO"}, false, []string{"FOO=bar", "HOME=/home/fake", "LANG=C.UTF-8", "PATH=/usr/bin"}},
+		{"declared but unset on host", []string{"NOPE"}, false, []string{"HOME=/home/fake", "LANG=C.UTF-8", "PATH=/usr/bin"}},
+		{"explicit agent socket", []string{"SSH_AUTH_SOCK"}, false, []string{"HOME=/home/fake", "LANG=C.UTF-8", "PATH=/usr/bin", "SSH_AUTH_SOCK=/run/agent"}},
+		{"inherit drops agent sockets", nil, true, []string{"AWS_SECRET_ACCESS_KEY=s3cret", "EMPTY=", "FOO=bar", "HOME=/home/fake", "LANG=C.UTF-8", "PATH=/usr/bin"}},
+		{"inherit plus explicit socket", []string{"SSH_AUTH_SOCK"}, true, []string{"AWS_SECRET_ACCESS_KEY=s3cret", "EMPTY=", "FOO=bar", "HOME=/home/fake", "LANG=C.UTF-8", "PATH=/usr/bin", "SSH_AUTH_SOCK=/run/agent"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,6 +125,20 @@ func TestBuildEnv(t *testing.T) {
 			}
 		})
 	}
+	t.Run("locale and colour pass through", func(t *testing.T) {
+		h := append([]string{"LANG=en_US.UTF-8", "LC_ALL=de_DE.UTF-8", "LC_TIME=C", "COLORTERM=truecolor", "LCX=no", "LANGUAGE=x"}, host...)
+		got, _ := BuildEnv(h, nil, false, base)
+		want := []string{"COLORTERM=truecolor", "HOME=/home/fake", "LANG=en_US.UTF-8", "LC_ALL=de_DE.UTF-8", "LC_TIME=C", "PATH=/usr/bin"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	})
+	t.Run("empty LANG still defaults", func(t *testing.T) {
+		got, _ := BuildEnv([]string{"LANG="}, nil, false, nil)
+		if !slices.Equal(got, []string{"LANG=C.UTF-8"}) {
+			t.Fatalf("got %v", got)
+		}
+	})
 	if _, err := BuildEnv(host, []string{"A=B"}, false, nil); err == nil {
 		t.Error("a name containing = must be rejected")
 	}
