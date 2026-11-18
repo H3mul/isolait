@@ -18,7 +18,7 @@ In a project directory, with your usual agent installed:
 6. Close the terminal window while attached, open a new one and `isolait attach`: the agent is still running.
 7. Ask the agent to print an OSC 52 clipboard write (`printf '\033]52;c;aGk=\007'`): the clipboard is not changed.
 
-Not yet run on a real agent. Automated stand-ins (a shell, a scripted alternate-screen program, a pty as the terminal)
+Run by hand on 2026-11-18 with Claude Code and OpenCode (see the launcher-script section). Automated stand-ins (a shell, a scripted alternate-screen program, a pty as the terminal)
 are in `internal/cli/attach_security_test.go` and `internal/relay/relay_test.go`.
 
 ## Launcher scripts: `isolait start claude` (session-ux-pickups 1.5)
@@ -29,7 +29,11 @@ Claude Code's interface appears, and the start prints `warning: claude is a laun
 2026-11-18 (isolait at the 1.4 commit, Claude Code under `/opt/claude-code`): `isolait start -d claude` then
 `isolait status` lists `/opt/claude-code/bin/claude` as a tool root and prints the warning (automated by
 `sandbox.TestLauncherInSystemDirRunsInSandbox` against a wrapper in a system directory). The interactive start on a
-real terminal is **not yet run**: it needs a person at a terminal.
+real terminal was run by hand the same day (see below).
+
+2026-11-18 (manual, interactive, real terminal): `isolait start claude` and `isolait start opencode` both start and
+run successfully through the relay. With a DeepSeek model, the agent was able to tell it was running in a sandbox
+(expected: isolait hides the host, it does not disguise itself).
 
 ## tmux inside a session (session-ux-pickups 5.5)
 
