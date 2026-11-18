@@ -255,7 +255,7 @@ directories), with the tool mounted read-only. Last run: 2026-11-18, WSL2 kernel
 | Tool (as downloaded, sha256 prefix) | What it checks | Result |
 |---|---|---|
 | [linpeas](https://github.com/peass-ng/PEASS-ng) `linpeas.sh` (`07c54b206a3c0483`) | privilege-escalation vectors, capabilities, protections, container and cloud detection, sockets, network, kernel exploit registry | no capabilities, `NoNewPrivs` set, no container runtime socket, no kernel exploit matched, no cloud metadata, only `lo` and `tap0`; nothing notable in the system, process, network and user sections |
-| [deepce](https://github.com/stealthcopper/deepce) `deepce.sh` (`a99f9dfe6509facc`) | Docker enumeration, escalation and escape | no Docker socket, user not in the docker group, escape CVE checks negative |
+| [deepce](https://github.com/stealthcopter/deepce) `deepce.sh` (`a99f9dfe6509facc`) | Docker enumeration, escalation and escape | no Docker socket, user not in the docker group, escape CVE checks negative |
 | [botb](https://github.com/brompwnie/botb) `botb-linux-amd64` (`3aae4a2bf41aedaa`) | break-out-the-box: container sockets, metadata services, Kubernetes secrets, recon | no Docker socket, no metadata service reachable, no Kubernetes secrets. Its "valid socket" report was a false positive: the sockets were created inside the sandbox by linpeas's own `gpg` run |
 | hand probes | capabilities, namespaces, host paths, mounts, sockets, keyrings | host home, `/run`, `/mnt`, `/init`, `/dev/kvm`, docker sockets absent; user namespaces and `mount` blocked; PID namespace shows only the session's processes |
 

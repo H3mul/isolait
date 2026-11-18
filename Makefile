@@ -1,7 +1,7 @@
 # Fast checks run everywhere; the security tier needs real user namespaces (see docs/security-tests.md).
 GO ?= go
 
-.PHONY: all build check test security canary mutations isolation e2e
+.PHONY: all build check test security canary mutations isolation e2e audit-fetch audit-update
 
 all: check test
 
@@ -37,3 +37,9 @@ isolation:
 # the whole user workflow (start, detach, attach, exec, mounts, ports, agent restart, stop) on the real kernel
 e2e:
 	$(GO) test -tags security -count=1 -v -run TestFullWorkflow ./internal/cli
+
+audit-fetch:
+	./scripts/audit/fetch.sh
+
+audit-update:
+	./scripts/audit/update.sh

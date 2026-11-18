@@ -1,0 +1,6 @@
+# Pinned third-party audit tools. Untrusted code: only ever run inside an isolait session (see docs/security-tests.md).
+# name  version  url  sha256  size-in-bytes
+# Change a pin only through a reviewed pull request; `make audit-update` prints the proposed diff.
+linpeas 20261117-8bfcfa5c https://github.com/peass-ng/PEASS-ng/releases/download/20261117-8bfcfa5c/linpeas.sh 07c54b206a3c0483c2d6c6cbadc0097eb13fd6946bddc5785e0b2b8c50597094 1833141
+deepce 420b1d1ddb63 https://raw.githubusercontent.com/stealthcopter/deepce/420b1d1ddb636f6bd277a105f580cd09b03517cc/deepce.sh 2c8301c3e8d12c01f6ad39e9513f5a7011ccaaee7eee1f40951a38b756d3bf98 41112
+botb 1.8.0 https://github.com/brompwnie/botb/releases/download/1.8.0/botb-linux-amd64 3aae4a2bf41aedaa3b12a2a97398fa89a9818b4bec433c20b4e724505277af83 13603167
