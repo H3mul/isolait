@@ -45,7 +45,7 @@ M = [
      "./internal/mounts", "TestWorkspaceMountPrimitive", True, 90),
     ("M09", "internal/mounts/mounts.go", "openTreeClone|syscall.O_CLOEXEC|atEmptyPath", "openTreeClone|syscall.O_CLOEXEC|atEmptyPath|0x8000",
      "./internal/mounts", "TestWorkspaceMountPrimitive", True, 90),
-    ("M10", "internal/mounts/mounts.go", "hasIsolait, err := HasIsolaitDir(real)", "hasIsolait, err := false, error(nil)",
+    ("M10", "internal/mounts/mounts.go", "hasIsolait, err := HasIsolaitDir(via)", "hasIsolait, err := false, error(nil)",
      "./internal/mounts", "TestWorkspaceMountPrimitive", True, 90),
     ("M11", "internal/sandbox/launch.go", "if err := mountcheck.Verify(box.ChildPID, p); err != nil {",
      "if err := func() error { _ = mountcheck.Verify; return nil }(); err != nil {",
@@ -258,8 +258,10 @@ def run_one(work, m):
         return "SURVIVED", "tests passed with the mutation applied", took
     if re.search(r"\[build failed\]|\[setup failed\]|^# ", out, re.M) and "--- FAIL" not in out and "panic:" not in out:
         return "BUILD", "the mutation does not compile:\n" + out[-600:], took
-    if "--- FAIL" in out or "panic:" in out or code == 124:
-        why = next((l.strip() for l in out.splitlines() if l.strip().startswith("--- FAIL") or l.startswith("panic:")), "timed out (a hang counts as caught)")
+    # a test binary that crashes or loses its output (a mutation can break the test's own file descriptors) still
+    # ends with a timed "FAIL <package>" line; a compile failure was handled above
+    if "--- FAIL" in out or "panic:" in out or code == 124 or re.search(r"^FAIL\s+\S+\s+[\d.]+s", out, re.M):
+        why = next((l.strip() for l in out.splitlines() if l.strip().startswith("--- FAIL") or l.startswith("panic:")), "timed out, or the test binary crashed (counts as caught)")
         return "caught", why, took
     return "BUILD", "failed without a test failure:\n" + out[-600:], took
 
