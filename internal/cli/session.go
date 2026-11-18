@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"github.com/H3mul/isolait/internal/sandbox"
 	"os"
 	"os/exec"
 	"os/user"
@@ -120,6 +121,8 @@ func statusCmd(d deps) *cobra.Command {
 			}
 			fmt.Fprintf(w, "tool roots  %s\nports       %s\nenv         %s\n", orNone(st.Roots), orNone(intsToStrings(st.Ports)), orNone(st.EnvNames))
 			fmt.Fprintf(w, "limits      %s\n", limitsLine(st.Limits))
+			_, denied, _ := sandbox.SeccompProgram() // the same build starts every session, so the count is the session's
+			fmt.Fprintf(w, "seccomp     on (%d syscalls denied)\n", denied)
 			for _, warn := range st.Warnings {
 				fmt.Fprintf(w, "warning  %s\n", warn)
 			}

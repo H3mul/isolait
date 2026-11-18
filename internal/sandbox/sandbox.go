@@ -21,6 +21,7 @@ type Sandbox struct {
 	ChildPID int // PID of the sandbox's PID 1 as seen from the broker
 	ShimPID  int // the init shim's own PID inside the sandbox (set by Launch; 1 when it is PID 1)
 	Plan     *plan.Plan
+	Denied   int // number of system calls the session's seccomp filter denies
 }
 
 // Start launches bwrap with the baseline for s, running argv as PID 1 of the sandbox. It must run in the
@@ -55,6 +56,23 @@ func Start(s Spec, p *plan.Plan, argv []string, extra []*os.File, stdin io.Reade
 		files = append(files, releaseR)
 		flags = append(flags, "--block-fd", strconv.Itoa(3+len(files)-1))
 	}
+	// the deny list is always applied; a failure to build or pass it is a start error, never a silent skip
+	prog, n, err := SeccompProgram()
+	if err != nil {
+		return nil, err
+	}
+	secR, secW, err := os.Pipe() // bwrap reads the program from this fd until EOF; it is far below the pipe buffer
+	if err != nil {
+		return nil, err
+	}
+	defer secR.Close()
+	if _, err := secW.Write(prog); err != nil {
+		secW.Close()
+		return nil, fmt.Errorf("seccomp: %w", err)
+	}
+	secW.Close()
+	files = append(files, secR)
+	flags = append(flags, "--seccomp", strconv.Itoa(3+len(files)-1))
 	args := renderArgs(s, p, flags...)
 	args = append(args, "--")
 	args = append(args, argv...)
@@ -89,7 +107,7 @@ func Start(s Spec, p *plan.Plan, argv []string, extra []*os.File, stdin io.Reade
 			return nil, fmt.Errorf("releasing the sandbox: %w", err)
 		}
 	}
-	return &Sandbox{Cmd: cmd, ChildPID: info.ChildPID, Plan: p}, nil
+	return &Sandbox{Cmd: cmd, ChildPID: info.ChildPID, Plan: p, Denied: n}, nil
 }
 
 // Wait waits for the sandbox's PID 1 to exit.

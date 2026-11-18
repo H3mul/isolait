@@ -3,6 +3,7 @@ package harden
 const (
 	auditArch  = 0xc000003e // AUDIT_ARCH_X86_64
 	sysSeccomp = 317
+	x32Bit     = 0x40000000 // the x32 ABI marks its numbers with this bit
 )
 
 // deniedCalls are the x86-64 numbers of the calls DenyDangerousCalls refuses.

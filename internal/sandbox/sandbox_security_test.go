@@ -5,10 +5,12 @@ package sandbox
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -689,5 +691,45 @@ print("count=%d" % len([p for p in os.listdir("/proc") if p.isdigit()]))` + "'"
 	}
 	if !strings.Contains(out, "fork") && !strings.Contains(out, "Resource temporarily unavailable") {
 		t.Errorf("the shell never reported a refused fork:\n%s", out)
+	}
+}
+
+// Raw system calls from inside a session (python3 ctypes, as the audit did): the deny list answers EPERM, the
+// io_uring family answers ENOSYS, and an ordinary ptrace of a child still works.
+func TestSeccompDenyListInTheSession(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("no python3 on this host")
+	}
+	nums := map[string][]int{ // keyctl add_key request_key syslog perf_event_open process_vm_readv io_uring_setup
+		"amd64": {250, 248, 249, 103, 298, 310, 425},
+		"arm64": {219, 217, 218, 116, 241, 270, 425},
+	}[runtime.GOARCH]
+	if nums == nil {
+		t.Skip("no syscall numbers for " + runtime.GOARCH)
+	}
+	names := []string{"keyctl", "add_key", "request_key", "syslog", "perf_event_open", "process_vm_readv", "io_uring_setup"}
+	var b strings.Builder
+	b.WriteString("python3 - <<'PY'\nimport ctypes, os\nlibc = ctypes.CDLL(None, use_errno=True)\n")
+	for i, n := range names {
+		fmt.Fprintf(&b, "libc.syscall(%d, 0, 0, 0, 0, 0, 0); print('%s=%%d' %% ctypes.get_errno())\n", nums[i], n)
+	}
+	b.WriteString(`pid = os.fork()
+if pid == 0:
+    os._exit(0 if libc.ptrace(0, 0, 0, 0) == 0 else 1)
+print('ptrace_child=%d' % os.waitpid(pid, 0)[1])
+PY
+`)
+	kv := runJob(t, job{Script: b.String()})
+	for _, n := range names {
+		want := strconv.Itoa(int(syscall.EPERM))
+		if n == "io_uring_setup" {
+			want = strconv.Itoa(int(syscall.ENOSYS))
+		}
+		if kv[n] != want {
+			t.Errorf("%s: errno %q, want %s", n, kv[n], want)
+		}
+	}
+	if kv["ptrace_child"] != "0" {
+		t.Errorf("ptrace of a child: wait status %q, want 0 (ptrace must keep working)", kv["ptrace_child"])
 	}
 }

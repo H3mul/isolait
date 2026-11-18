@@ -3,6 +3,7 @@ package harden
 const (
 	auditArch  = 0xc00000b7 // AUDIT_ARCH_AARCH64
 	sysSeccomp = 277
+	x32Bit     = 0
 )
 
 // deniedCalls are the arm64 numbers of the calls DenyDangerousCalls refuses.

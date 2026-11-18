@@ -57,7 +57,7 @@ func normalize(lines []string, dir string) []string {
 			}
 		}
 		l = strings.Join(f, " ")
-		if l == "" || strings.HasPrefix(l, "limits") { // the limits line depends on the host's systemd
+		if l == "" || strings.HasPrefix(l, "limits") || strings.HasPrefix(l, "seccomp") { // limits depend on the host's systemd; the denied count on the build
 			continue
 		}
 		out = append(out, l)
