@@ -202,6 +202,29 @@ func Query(base, id string) (Status, error) {
 	return st, json.Unmarshal(resp.Data, &st)
 }
 
+// WaitStartup asks the daemon whether the agent survived its first 2 seconds. When it did not, the daemon is
+// already tearing the session down and the result carries the agent's status and the tail of its output.
+func WaitStartup(base, id string) (Startup, error) {
+	resp, err := ctl.Call(session.SocketPath(base, id), ctl.Request{Op: "wait-startup"})
+	if err != nil {
+		return Startup{}, err
+	}
+	var st Startup
+	return st, json.Unmarshal(resp.Data, &st)
+}
+
+// WaitGone waits (briefly) until the session's runtime directory has been removed, then removes it itself if
+// the daemon did not: a failed start leaves nothing.
+func WaitGone(base, id string) {
+	for i := 0; i < 100; i++ {
+		if _, err := os.Stat(session.Dir(base, id)); os.IsNotExist(err) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	session.Remove(base, id)
+}
+
 // Entry is one session found in the runtime directory.
 type Entry struct {
 	ID     string

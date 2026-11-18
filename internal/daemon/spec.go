@@ -14,6 +14,8 @@ type Spec struct {
 	Workdir     string // the starting workspace on the host
 	Name        string // its name under /workspaces
 	RO          bool
+	Detached    bool     // start -d (or no terminal): the agent starts at once, without a client
+	Term        string   // the starting terminal's TERM, for an agent started without a client
 	Agent       []string // the agent command and its arguments (Agent[0] is resolved on HostPath)
 	HostEnv     []string // host variables available to the allowlist (see sandbox.BuildEnv)
 	EnvNames    []string // variables to forward (--env and config env)
@@ -46,7 +48,7 @@ type MountInfo struct {
 // Status is what `isolait status` and `isolait list` show.
 type Status struct {
 	ID       string       `json:"id"`
-	State    string       `json:"state"` // idle (no agent running); attached and detached arrive with group 4
+	State    string       `json:"state"` // attached or detached: a session lives only while its agent runs
 	PID      int          `json:"pid"`   // the daemon
 	Started  time.Time    `json:"started"`
 	Workdir  string       `json:"workdir"`

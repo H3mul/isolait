@@ -37,9 +37,14 @@ func RunFromFD() error {
 	return err
 }
 
+const (
+	startupGrace = 2 * time.Second  // how long `start -d` waits for an agent that fails at once
+	attachGrace  = 15 * time.Second // how long a session started attached waits for its first attach
+)
+
 type sessionState struct {
 	mu       sync.Mutex
-	state    func() string // idle, detached or attached
+	state    func() string // detached or attached
 	net      func() string // the network engine: up, or down with the reason
 	netPID   func() int
 	ports    func() []int // the open port grants
@@ -162,6 +167,14 @@ func Run(spec Spec) error {
 	argv := append([]string{bins.AgentPath}, spec.Agent[1:]...)
 	tm := newTerminals(cl, argv, env, dst)
 	tm.onUse = func() { session.Touch(spec.RuntimeBase, spec.ID) }
+	if spec.Detached {
+		if err := tm.StartNow(spec.Term, 80, 24); err != nil {
+			box.Kill()
+			return fmt.Errorf("starting the agent: %w", err)
+		}
+	} else {
+		tm.deferred = true // the first attach starts the agent with its terminal
+	}
 	defer tm.Close()
 	attachSrv, err := tm.Listen(session.AttachPath(spec.RuntimeBase, spec.ID))
 	if err != nil {
@@ -199,6 +212,14 @@ func Run(spec Spec) error {
 	go func() { box.Wait(); close(exited) }()
 	stopping := make(chan struct{})
 	var once sync.Once
+	var waiters sync.WaitGroup // `start -d` callers waiting to hear whether the agent survived
+	if !spec.Detached {
+		time.AfterFunc(attachGrace, func() { // the launcher died before attaching: do not keep an agentless session
+			if tm.neverStarted() {
+				once.Do(func() { close(stopping) })
+			}
+		})
+	}
 	go srv.Serve(func(r ctl.Request) (any, error) {
 		switch r.Op {
 		case "ping":
@@ -226,6 +247,10 @@ func Run(spec Spec) error {
 			st.mu.Lock()
 			defer st.mu.Unlock()
 			return portOp(engine, r.Op == "allow-ports", r.Args[0])
+		case "wait-startup":
+			waiters.Add(1)
+			defer waiters.Done()
+			return tm.WaitStartup(startupGrace), nil
 		case "stop":
 			once.Do(func() { close(stopping) })
 			return "stopping", nil
@@ -235,6 +260,15 @@ func Run(spec Spec) error {
 
 	select {
 	case <-stopping:
+		cl.Shutdown()
+		select {
+		case <-exited:
+		case <-time.After(5 * time.Second):
+			box.Kill()
+		}
+	case <-tm.done: // the agent exited: the session ends with it
+		waiters.Wait()
+		time.Sleep(100 * time.Millisecond) // let a waiting `start -d` write its answer before the process goes
 		cl.Shutdown()
 		select {
 		case <-exited:

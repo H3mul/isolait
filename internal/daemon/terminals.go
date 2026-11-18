@@ -32,6 +32,13 @@ type terminals struct {
 
 	onUse func() // the user attached or detached (not exec): the session was just used
 
+	// deferred: the agent is started by the first attach (with that terminal's TERM and size) instead of at once.
+	deferred bool
+	ring     []byte        // the last ringSize bytes of the agent's output, for a start that fails at once
+	done     chan struct{} // closed when the agent has exited and its client has been told
+	exit     attach.ExitInfo
+	started  time.Time // when the agent was started
+
 	mu       sync.Mutex
 	agent    *proc
 	attached *client
@@ -74,20 +81,80 @@ func (c *client) send(f attach.Frame) {
 func newTerminals(cl *initshim.Client, argv, env []string, cwd string) *terminals {
 	t := &terminals{cl: cl, argv: argv, env: env, cwd: cwd, execs: map[*proc]bool{}, handlers: map[int]*proc{}, early: map[int]initshim.Event{}}
 	go t.dispatchExits()
+	t.done = make(chan struct{})
 	return t
 }
 
-// State is idle (no agent running), detached (agent running, nobody attached) or attached.
+// State is attached or detached: a session exists only while its agent runs (or is about to start with the
+// first attach).
 func (t *terminals) State() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	switch {
-	case t.attached != nil:
+	if t.attached != nil {
 		return "attached"
-	case t.agent != nil:
-		return "detached"
 	}
-	return "idle"
+	return "detached"
+}
+
+// neverStarted reports that no agent has been started yet (a deferred session still waiting for its attach).
+func (t *terminals) neverStarted() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.deferred && t.agent == nil
+}
+
+// ringSize is how much of the agent's output is kept for a start that fails at once.
+const ringSize = 2048
+
+// StartNow starts the agent without a client, on a pty of the given size (an attach resizes it).
+func (t *terminals) StartNow(termName string, cols, rows int) error {
+	a, err := t.spawn(t.argv, t.environ(termName), cols, rows, true, nil)
+	if err != nil {
+		return err
+	}
+	t.mu.Lock()
+	t.agent = a
+	t.started = time.Now()
+	t.mu.Unlock()
+	return nil
+}
+
+// Startup is the answer to "did the agent survive its first moments".
+type Startup struct {
+	Exited bool   `json:"exited"`
+	Code   int    `json:"code,omitempty"`
+	Signal int    `json:"signal,omitempty"`
+	Tail   string `json:"tail,omitempty"` // the last 2 KiB of the agent's output, control characters removed
+}
+
+// WaitStartup blocks until the agent exits or grace has passed since it was started.
+func (t *terminals) WaitStartup(grace time.Duration) Startup {
+	t.mu.Lock()
+	left := grace - time.Since(t.started)
+	t.mu.Unlock()
+	if left < 0 {
+		left = 0
+	}
+	select {
+	case <-t.done:
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		return Startup{Exited: true, Code: t.exit.Code, Signal: t.exit.Signal, Tail: printable(t.ring)}
+	case <-time.After(left):
+		return Startup{}
+	}
+}
+
+// printable keeps text and newlines: output of an agent that failed is shown on the user's terminal, so
+// escape sequences and other control bytes are dropped.
+func printable(b []byte) string {
+	out := make([]byte, 0, len(b))
+	for _, c := range b {
+		if c == '\n' || c == '\t' || c >= 0x20 && c != 0x7f {
+			out = append(out, c)
+		}
+	}
+	return string(out)
 }
 
 // Listen serves the attach socket until the returned listener is closed.
@@ -224,6 +291,10 @@ func (t *terminals) output(p *proc, b []byte) {
 	t.mu.Lock()
 	if p.agent {
 		t.tracker.Write(b)
+		t.ring = append(t.ring, b...)
+		if len(t.ring) > ringSize {
+			t.ring = t.ring[len(t.ring)-ringSize:]
+		}
 		dst = t.attached
 	} else {
 		dst = p.client
@@ -246,6 +317,7 @@ func (t *terminals) finish(p *proc) {
 	t.mu.Lock()
 	if p.agent {
 		t.agent = nil
+		t.exit = attach.ExitInfo{Code: e.Code, Signal: e.Signal}
 		dst, t.attached = t.attached, nil
 	} else {
 		delete(t.execs, p)
@@ -255,6 +327,9 @@ func (t *terminals) finish(p *proc) {
 	if dst != nil {
 		dst.conn.SendJSON(attach.Exit, attach.ExitInfo{Code: e.Code, Signal: e.Signal})
 		dst.raw.Close()
+	}
+	if p.agent {
+		close(t.done) // the session ends with its agent
 	}
 }
 
@@ -305,13 +380,19 @@ func (t *terminals) serveAgent(c *client, h attach.HelloMsg) {
 		c.conn.SendJSON(attach.Hello, attach.Reply{Error: "this session already has a client attached; detach it first"})
 		return
 	}
-	t.attached = c
 	a := t.agent
+	if a == nil && !t.deferred { // the agent has exited: the session is ending
+		t.mu.Unlock()
+		c.gate.Unlock()
+		c.conn.SendJSON(attach.Hello, attach.Reply{Error: "the session has ended"})
+		return
+	}
+	t.attached = c
 	t.mu.Unlock()
 	t.used()
 
 	restarted := false
-	if a == nil {
+	if a == nil { // first attach of a session started attached: the agent starts with this terminal
 		var err error
 		a, err = t.spawn(t.argv, t.environ(h.Term), h.Cols, h.Rows, true, nil)
 		if err != nil {
@@ -323,7 +404,7 @@ func (t *terminals) serveAgent(c *client, h attach.HelloMsg) {
 			return
 		}
 		t.mu.Lock()
-		t.agent = a
+		t.agent, t.deferred, t.started = a, false, time.Now()
 		t.mu.Unlock()
 		restarted = true
 	} else {

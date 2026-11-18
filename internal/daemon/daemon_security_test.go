@@ -55,7 +55,7 @@ func (e env) spec(t *testing.T, agent string) Spec {
 	exe, _ = filepath.EvalSymlinks(exe)
 	bwrap, _ := exec.LookPath("bwrap")
 	return Spec{
-		ID: id, RuntimeBase: e.base, StateDir: e.state, Workdir: e.work, Name: "proj",
+		ID: id, RuntimeBase: e.base, StateDir: e.state, Workdir: e.work, Name: "proj", Detached: true, Term: "xterm",
 		Agent: []string{agent}, HostEnv: []string{"AWS_SECRET_ACCESS_KEY=s3cret", "FOO=bar"}, EnvNames: []string{"FOO"},
 		HostHome: "/home/fakeuser", HostPath: os.Getenv("PATH"), User: "fakeuser",
 		UID: os.Getuid(), GID: os.Getgid(), InitExe: exe, InitArgs: []string{"__isolait_init__"}, Bwrap: bwrap,
@@ -120,12 +120,12 @@ func TestSessionLifecycle(t *testing.T) {
 		t.Fatal("daemon is not running after Launch returned")
 	}
 
-	// status: idle, the starting workspace, only declared environment names, no secrets
+	// status: detached (the shell runs, nobody attached), the starting workspace, only declared environment names, no secrets
 	st, err := Query(e.base, spec.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.State != "idle" || len(st.Mounts) != 1 || st.Mounts[0].Path != "/workspaces/proj" || st.Mounts[0].Mode != "rw" || st.Workdir != e.work {
+	if st.State != "detached" || len(st.Mounts) != 1 || st.Mounts[0].Path != "/workspaces/proj" || st.Mounts[0].Mode != "rw" || st.Workdir != e.work {
 		t.Errorf("status %+v", st)
 	}
 	names := strings.Join(st.EnvNames, ",")
@@ -137,7 +137,7 @@ func TestSessionLifecycle(t *testing.T) {
 		t.Fatalf("list: %+v %v", es, err)
 	}
 
-	// the sandbox is really there while the session is idle
+	// the sandbox is really there while the session runs
 	if !anyProcessMentions(spec.ID) {
 		t.Error("no sandbox process found for a running session")
 	}
@@ -203,8 +203,10 @@ func TestFailedStartLeavesNothingRunning(t *testing.T) {
 func TestTwoSessionsAreIndependent(t *testing.T) {
 	e := newEnv(t)
 	a, b := e.spec(t, "sh"), e.spec(t, "sh")
-	b.Workdir = e.base // any other existing directory
+	b.Workdir = filepath.Join(filepath.Dir(e.base), "other") // the runtime directory itself is protected
+	os.MkdirAll(b.Workdir, 0o755)
 	b.Name = "other"
+	t.Cleanup(func() { Stop(e.base, a.ID); Stop(e.base, b.ID) }) // a skip after the first launch must not leak it
 	for _, s := range []Spec{a, b} {
 		if err := Launch(s, os.Args[0]); err != nil {
 			t.Skipf("cannot launch here: %v", err)
@@ -340,6 +342,7 @@ func readUntil(t *testing.T, c *attach.Conn, raw net.Conn, want string) string {
 func TestAttachAndExecInTheRealSandbox(t *testing.T) {
 	e := newEnv(t)
 	spec := e.spec(t, "sh")
+	spec.Detached = false // started attached: the first attach starts the shell with that terminal
 	if err := Launch(spec, os.Args[0]); err != nil {
 		t.Skipf("cannot launch here: %v", err)
 	}
@@ -395,4 +398,129 @@ func waitState(t *testing.T, e env, id, want string) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("session never reached state %q", want)
+}
+
+// exitOf reads frames until the process exit and returns it.
+func exitOf(t *testing.T, c *attach.Conn, raw net.Conn) attach.ExitInfo {
+	t.Helper()
+	raw.SetReadDeadline(time.Now().Add(15 * time.Second))
+	for {
+		f, err := c.Recv()
+		if err != nil {
+			t.Fatalf("connection ended without an exit frame: %v", err)
+		}
+		if f.Type == attach.Exit {
+			var x attach.ExitInfo
+			json.Unmarshal(f.Payload, &x)
+			return x
+		}
+	}
+}
+
+// nothingLeft asserts that a session left no daemon, sandbox process, mount or runtime directory behind.
+func nothingLeft(t *testing.T, e env, spec Spec, pid int) {
+	t.Helper()
+	waitGone(t, "the runtime directory", func() bool { _, err := os.Stat(session.Dir(e.base, spec.ID)); return err == nil })
+	if pid > 0 {
+		waitGone(t, "the daemon process", func() bool { return alive(pid) })
+	}
+	waitGone(t, "sandbox processes", func() bool { return anyProcessMentions(spec.ID) })
+	if hostMountsMention(spec.ID) {
+		t.Error("a mount of the session leaked into the host mount namespace")
+	}
+	if es, _ := List(e.base); len(es) != 0 {
+		t.Errorf("an ended session is still listed: %+v", es)
+	}
+}
+
+// 5.1: the session ends with its agent, the exit status reaches the attached client, and nothing is left.
+func TestAgentExitEndsTheSession(t *testing.T) {
+	e := newEnv(t)
+	spec := e.spec(t, "sh")
+	spec.Agent = []string{"sh", "-c", "echo bye; exit 3"}
+	spec.Detached = false
+	if err := Launch(spec, os.Args[0]); err != nil {
+		t.Skipf("cannot launch here: %v", err)
+	}
+	pid := daemonPID(t, e, spec.ID)
+	c, raw, r := dialAttach(t, e, spec.ID, attach.HelloMsg{Mode: attach.ModeAgent, Term: "xterm", Cols: 80, Rows: 24})
+	if !r.OK {
+		t.Fatalf("attach: %+v", r)
+	}
+	if x := exitOf(t, c, raw); x.Code != 3 {
+		t.Errorf("exit %+v, want status 3", x)
+	}
+	nothingLeft(t, e, spec, pid)
+}
+
+// 5.1: a detached shell is running and listed detached; ending it ends the session.
+func TestDetachedShellRunsAndEndingItEndsTheSession(t *testing.T) {
+	e := newEnv(t)
+	spec := e.spec(t, "sh")
+	if err := Launch(spec, os.Args[0]); err != nil {
+		t.Skipf("cannot launch here: %v", err)
+	}
+	pid := daemonPID(t, e, spec.ID)
+	if st, err := Query(e.base, spec.ID); err != nil || st.State != "detached" {
+		t.Fatalf("a detached start must list as detached: %+v %v", st, err)
+	}
+	c, raw, r := dialAttach(t, e, spec.ID, attach.HelloMsg{Mode: attach.ModeAgent, Term: "xterm", Cols: 80, Rows: 24})
+	if !r.OK || r.Restarted {
+		t.Fatalf("attach to the running shell: %+v", r)
+	}
+	c.Send(attach.Frame{Type: attach.Data, Payload: []byte("exit 5\n")})
+	if x := exitOf(t, c, raw); x.Code != 5 {
+		t.Errorf("exit %+v, want status 5", x)
+	}
+	nothingLeft(t, e, spec, pid)
+}
+
+// 5.2: an agent that fails at once fails the start with its status and output, and leaves nothing.
+func TestStartupFailureLeavesNothing(t *testing.T) {
+	e := newEnv(t)
+	spec := e.spec(t, "sh")
+	spec.Agent = []string{"sh", "-c", "echo broken launcher >&2; exit 127"}
+	if err := Launch(spec, os.Args[0]); err != nil {
+		t.Skipf("cannot launch here: %v", err)
+	}
+	pid := daemonPID(t, e, spec.ID)
+	up, err := WaitStartup(e.base, spec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !up.Exited || up.Code != 127 || !strings.Contains(up.Tail, "broken launcher") {
+		t.Errorf("startup result %+v", up)
+	}
+	WaitGone(e.base, spec.ID)
+	nothingLeft(t, e, spec, pid)
+}
+
+// 5.3: prepare a detached shell (a mount and a port), then attach: the same shell, with both in place.
+func TestPrepareThenRun(t *testing.T) {
+	e := newEnv(t)
+	spec := e.spec(t, "sh")
+	if err := Launch(spec, os.Args[0]); err != nil {
+		t.Skipf("cannot launch here: %v", err)
+	}
+	defer Stop(e.base, spec.ID)
+	lib := filepath.Join(filepath.Dir(e.work), "lib")
+	os.MkdirAll(lib, 0o755)
+	os.WriteFile(filepath.Join(lib, "marker"), []byte("hello\n"), 0o644)
+	if _, err := AddMount(e.base, spec.ID, lib, "", true); err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	if _, err := AllowPorts(e.base, spec.ID, "18080"); err != nil {
+		t.Fatalf("port: %v", err)
+	}
+	c, raw, r := dialAttach(t, e, spec.ID, attach.HelloMsg{Mode: attach.ModeAgent, Term: "xterm", Cols: 80, Rows: 24})
+	if !r.OK || r.Restarted {
+		t.Fatalf("attach must find the shell already running: %+v", r)
+	}
+	c.Send(attach.Frame{Type: attach.Data, Payload: []byte("echo m\"\"ount=$(cat /workspaces/lib/marker) en\"\"d\n")})
+	if out := readUntil(t, c, raw, "mount=hello end"); !strings.Contains(out, "mount=hello end") {
+		t.Errorf("the mount is not in the shell: %q", out)
+	}
+	if st, _ := Query(e.base, spec.ID); len(st.Ports) != 1 || st.Ports[0] != 18080 {
+		t.Errorf("ports %v, want [18080]", st.Ports)
+	}
 }

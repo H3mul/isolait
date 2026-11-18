@@ -231,7 +231,9 @@ func startCmd(d deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			spec := daemon.Spec{
+			in, isFile := cmd.InOrStdin().(*os.File)
+			attached := !detached && isFile && pty.IsTerminal(int(in.Fd()))
+			spec := daemon.Spec{Detached: !attached, Term: os.Getenv("TERM"),
 				ID: id, RuntimeBase: base, GlobalDir: p.GlobalDir, StateDir: p.StateDir, Workdir: wd, Name: mounts.NameFor(wd), RO: ro,
 				Agent: args, HostEnv: os.Environ(), EnvNames: res.Config.Env, InheritEnv: res.Config.InheritEnv,
 				InheritPath: res.Config.InheritPath, Tools: res.Config.Tools, AllowUserns: res.Config.AllowUserns,
@@ -251,10 +253,30 @@ func startCmd(d deps) *cobra.Command {
 					fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
 				}
 			}
-			if in, ok := cmd.InOrStdin().(*os.File); !detached && ok && pty.IsTerminal(int(in.Fd())) {
+			if attached {
 				return attachTo(cmd, d, base, id, attach.HelloMsg{Mode: attach.ModeAgent})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "started %s (idle: the agent is started when you attach)\n", id)
+			// detached: the agent is already running; one that fails at once ends the session and fails the start
+			up, err := daemon.WaitStartup(base, id)
+			if err != nil {
+				return fmt.Errorf("session %s: %w", id, err)
+			}
+			if up.Exited {
+				daemon.WaitGone(base, id)
+				if up.Tail != "" {
+					fmt.Fprintln(cmd.ErrOrStderr(), strings.TrimRight(up.Tail, "\n"))
+				}
+				code := up.Code
+				if up.Signal != 0 {
+					code = 128 + up.Signal
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "the agent exited at start with status %d; no session was left\n", code)
+				if code == 0 {
+					code = 1
+				}
+				return &ExitError{Code: code}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "started %s (detached)\n", id)
 			return nil
 		},
 	}

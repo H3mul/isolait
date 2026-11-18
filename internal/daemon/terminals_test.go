@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -45,7 +46,19 @@ func newShim(t *testing.T) *initshim.Client {
 func newTerms(t *testing.T, agentScript string) *terminals {
 	t.Helper()
 	tm := newTerminals(newShim(t), []string{"/bin/sh", "-c", agentScript}, []string{"PATH=/usr/bin:/bin", "HOME=/tmp"}, "/")
+	tm.deferred = true // the first attach starts the agent, as for a session started attached
 	t.Cleanup(tm.Close)
+	return tm
+}
+
+// newRunningTerms is a session started detached: the agent runs at once, on an 80x24 pty.
+func newRunningTerms(t *testing.T, agentScript string) *terminals {
+	t.Helper()
+	tm := newTerms(t, agentScript)
+	tm.deferred = false
+	if err := tm.StartNow("xterm", 80, 24); err != nil {
+		t.Fatal(err)
+	}
 	return tm
 }
 
@@ -191,8 +204,8 @@ func TestAllPTYOutputFlowsThroughTheSingleOutputPath(t *testing.T) {
 
 func TestAttachStartsAgentAndRelaysInput(t *testing.T) {
 	tm := newTerms(t, `cat`)
-	if st := tm.State(); st != "idle" {
-		t.Fatalf("state before attach: %s", st)
+	if tm.agent != nil {
+		t.Fatal("a session started attached must not start its agent before the first attach")
 	}
 	c := dial(t, tm, agentHello())
 	if !c.reply.OK || !c.reply.Restarted {
@@ -214,20 +227,70 @@ func TestResizeReachesTheTerminal(t *testing.T) {
 	c.mustSee("43 132")
 }
 
-func TestAgentExitIsReportedAndReattachRestartsIt(t *testing.T) {
+func TestAgentExitIsReportedAndEndsTheSession(t *testing.T) {
 	tm := newTerms(t, `printf bye; exit 7`)
 	c := dial(t, tm, agentHello())
 	c.mustSee("bye")
 	if e := c.waitExit(); e.Code != 7 {
 		t.Errorf("exit %+v, want code 7", e)
 	}
-	eventually(t, "the session to go idle", func() bool { return tm.State() == "idle" })
-
-	c2 := dial(t, tm, agentHello())
-	if !c2.reply.OK || !c2.reply.Restarted {
-		t.Fatalf("reattach after exit must restart the agent: %+v", c2.reply)
+	select {
+	case <-tm.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session did not end with its agent")
 	}
-	c2.mustSee("bye")
+	// nothing restarts it: a later attach is refused
+	c2 := dial(t, tm, agentHello())
+	if c2.reply.OK || !strings.Contains(c2.reply.Error, "ended") {
+		t.Fatalf("attach after exit: %+v", c2.reply)
+	}
+}
+
+// 5.1: a detached start runs the agent at once, on 80x24; an attach resizes it.
+func TestDetachedStartRunsTheAgentAtOnce(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "size")
+	tm := newRunningTerms(t, `stty size > `+file+`; read x; stty size; sleep 20`)
+	eventually(t, "the agent to run before any attach", func() bool {
+		b, _ := os.ReadFile(file)
+		return strings.TrimSpace(string(b)) == "24 80"
+	})
+	if tm.State() != "detached" {
+		t.Errorf("state %s", tm.State())
+	}
+	c := dial(t, tm, attach.HelloMsg{Mode: attach.ModeAgent, Term: "xterm", Cols: 100, Rows: 30})
+	if !c.reply.OK || c.reply.Restarted {
+		t.Fatalf("attach to the running agent: %+v", c.reply)
+	}
+	c.conn.Send(attach.Frame{Type: attach.Data, Payload: []byte("\n")})
+	c.mustSee("30 100") // resized by the attach
+}
+
+// 5.2 (daemon side): an agent that fails at once is reported with its status and the tail of its output.
+func TestWaitStartupReportsAnImmediateFailure(t *testing.T) {
+	tm := newRunningTerms(t, `printf 'boom\033[31m: no such file\n'; exit 127`)
+	r := tm.WaitStartup(5 * time.Second)
+	if !r.Exited || r.Code != 127 || !strings.Contains(r.Tail, "boom[31m: no such file") || strings.Contains(r.Tail, "\x1b") {
+		t.Errorf("%+v", r)
+	}
+}
+
+func TestWaitStartupSeesALiveAgent(t *testing.T) {
+	tm := newRunningTerms(t, `sleep 20`)
+	start := time.Now()
+	if r := tm.WaitStartup(300 * time.Millisecond); r.Exited {
+		t.Errorf("a live agent reported as exited: %+v", r)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Error("waited far beyond the grace period")
+	}
+}
+
+func TestOutputTailKeepsOnlyTheLast2KiB(t *testing.T) {
+	tm := newRunningTerms(t, `head -c 5000 /dev/zero | tr '\0' a; printf END; exit 1`)
+	r := tm.WaitStartup(5 * time.Second)
+	if !r.Exited || len(r.Tail) > ringSize || !strings.HasSuffix(r.Tail, "END") {
+		t.Errorf("tail len %d, exited %v", len(r.Tail), r.Exited)
+	}
 }
 
 func TestDetachKeepsAgentRunningAndReattachRestoresModes(t *testing.T) {
@@ -288,8 +351,8 @@ func TestExecRunsInTheSandboxAndReportsExit(t *testing.T) {
 	if x := e.waitExit(); x.Code != 5 {
 		t.Errorf("exit %+v", x)
 	}
-	if tm.State() != "idle" {
-		t.Errorf("an exec session must not change the agent state: %s", tm.State())
+	if tm.agent != nil {
+		t.Error("an exec must not start the agent")
 	}
 }
 

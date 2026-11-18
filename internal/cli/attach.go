@@ -69,7 +69,7 @@ func attachTo(cmd *cobra.Command, d deps, base, id string, hello attach.HelloMsg
 	case res.Detached:
 		fmt.Fprintf(stderr, "[detached from %s]\n", id)
 	case res.Exit != nil && hello.Mode == attach.ModeAgent:
-		fmt.Fprintf(stderr, "[%s: the agent exited with status %d; attach again to restart it]\n", id, exitStatus(res.Exit))
+		fmt.Fprintf(stderr, "[%s: the agent exited with status %d; the session has ended]\n", id, exitStatus(res.Exit))
 		if code := exitStatus(res.Exit); code != 0 {
 			return &ExitError{Code: code}
 		}
