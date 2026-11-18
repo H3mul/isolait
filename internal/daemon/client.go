@@ -177,6 +177,13 @@ func waitReady(spec Spec, died <-chan error) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	// a daemon that is alive but silent: make it print its goroutine stacks to its log, so the failure says where it hangs
+	if b, err := os.ReadFile(filepath.Join(dir, "pid")); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 1 {
+			syscall.Kill(pid, syscall.SIGQUIT)
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
 	return startFailure(dir, errors.New("timed out waiting for the session daemon"))
 }
 

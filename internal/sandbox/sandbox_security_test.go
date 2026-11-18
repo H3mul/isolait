@@ -758,6 +758,7 @@ func TestKeyringsAreNotSharedWithTheHost(t *testing.T) {
 		return int(id)
 	}
 	ids := []int{add("isolait-canary-default", "host-secret-1"), add("isolait-canary-open", "host-secret-2")}
+	syscall.Syscall6(unix.SYS_KEYCTL, 5, uintptr(ids[1]), 0x3f3f0000, 0, 0, 0) // KEYCTL_SETPERM: user all (fails without possession; fine)
 
 	nr := map[string]int{"amd64": 250, "arm64": 219}[runtime.GOARCH] // keyctl
 	if nr == 0 {
@@ -787,12 +788,16 @@ PY
 	if kv["revoke"] != strconv.Itoa(int(syscall.EPERM)) {
 		t.Errorf("keyctl revoke of a host key: errno %q, want EPERM", kv["revoke"])
 	}
-	// the host keys survived
+	// the host keys survived: still describable (always allowed to the owner) and, where this thread may read them (it
+	// possesses the user keyring, as in a login session, but not on CI runners), unchanged
 	for i, want := range []string{"host-secret-1", "host-secret-2"} {
-		buf := make([]byte, 64)
-		n, _, e := syscall.Syscall6(unix.SYS_KEYCTL, 11, uintptr(ids[i]), uintptr(unsafe.Pointer(&buf[0])), 64, 0, 0)
-		if e != 0 || string(buf[:n]) != want {
-			t.Errorf("host canary %d changed: %v %q", ids[i], e, buf[:n])
+		buf := make([]byte, 128)
+		if n, _, e := syscall.Syscall6(unix.SYS_KEYCTL, 6, uintptr(ids[i]), uintptr(unsafe.Pointer(&buf[0])), 128, 0, 0); e != 0 || int(n) <= 0 {
+			t.Errorf("host canary %d is gone: %v", ids[i], e)
+		}
+		n, _, e := syscall.Syscall6(unix.SYS_KEYCTL, 11, uintptr(ids[i]), uintptr(unsafe.Pointer(&buf[0])), 128, 0, 0)
+		if e == 0 && string(buf[:n]) != want {
+			t.Errorf("host canary %d changed to %q", ids[i], buf[:n])
 		}
 	}
 }
