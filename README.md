@@ -145,11 +145,34 @@ runs in the sandbox:
 
 Hardening: no capabilities, new user, pid, ipc, uts, cgroup and network namespaces, a new terminal session,
 termination when the daemon exits, and nested user namespaces blocked unless you opt in with `--allow-userns`.
-There is no network device yet.
+Network access is described under [Network egress](#network-egress).
+
+Agents installed as a wrapper script (for example `/usr/sbin/claude` doing `exec /opt/claude-code/bin/claude`)
+need the real install tree mounted too, since only the resolved file's own directory is exposed. Add it with
+`tools = ["/opt/claude-code"]` in the [config](docs/config.md); without it the agent exits with status 127.
 
 Sessions live as long as their init process. They have no idle timeout, and the agent exiting does not end the
 session. `isolait stop` ends it and releases every process, mount and runtime file; the agent's persistent home
 is kept.
+
+## Network egress
+
+The sandbox has its own network namespace with one interface (`tap0`, `10.0.2.15`) and nothing else: no route to
+the host's interfaces, no host loopback. A userspace network stack (gVisor netstack) in a separate, hardened
+per-session process (`isolait netd`, no mount authority, seccomp-filtered) connects outbound on the sandbox's behalf.
+
+- **TCP only.** UDP other than DNS is dropped. **ICMP is dropped**, so `ping` does not work.
+- **IPv4 only.** IPv6 is disabled in the sandbox; hosts are reached over their IPv4 addresses.
+- **DNS** goes to the gateway `10.0.2.2`, which asks the host's resolvers (`/etc/resolv.conf` is re-read for
+  every query, so a VPN or network change is followed). The sandbox never learns the real resolver addresses.
+- **Blocked destinations**, checked on the resolved address at connect time (so a name that resolves to a
+  private address is refused too): loopback, RFC 1918 private ranges, CGNAT, link-local, cloud metadata
+  endpoints, multicast, reserved ranges and the host's own addresses. Only public addresses are reachable;
+  a blocked connect fails like a refused connection (`curl` exit 7).
+- There is no inbound access; the sandbox cannot be reached from the network.
+
+Verified against the real internet: HTTPS to the model API, `git` over HTTPS and `npm install` work; see the
+manual record in the OpenSpec store (`spikes/e2e.md`).
 
 ## Resource limits
 
