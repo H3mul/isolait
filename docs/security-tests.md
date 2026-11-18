@@ -89,6 +89,7 @@ line exists, its mutation in the same change.
 | 1.6 | A dead engine is reported by `status` (`network: down: ...`) without ending the session; an engine that fails to start (here: a bad flag) fails the whole session start with its error text and leaves no process behind | Decision 5 | `daemon.TestEngineDeathIsReportedAndDoesNotEndTheSession`, `daemon.TestFailingEngineFailsTheStartAndLeavesNothing` | n/a | security |
 | 1.6 | The sandbox is held (`--block-fd`) after its namespaces exist and released only after the engine reports ready: no sandbox process runs before its network is hardened and up | Decision 5 (start order) | every daemon session test (the init shim answers only after release); `daemon.TestSandboxNetworkEndToEnd` | M86 | security |
 | 1.2, 1.9 | A hot mount is visible, `.isolait` is masked, a read-only mount is never writable and cannot be remounted; a protected path or any ancestor is refused by dev+inode (also through symlinks, and a path swapped for a symlink after validation); a busy mount is reported with its processes and `--force` detaches it; a mismatch with the plan after a change is rolled back | Decisions 2, 3, 5 | `mounts.TestDenyList*`, `TestOpenSourceDescriptorIsStable`, `daemon.TestHotMount*`, `TestRemoveBusyForcedAndSwitch`, `TestUnplannedMountIsRolledBack`, `cli.TestMountAndUnmountCommands` | M87 to M94 | fast and security |
+| 1.7 | A port grant is a listener on the sandbox loopback forwarded to host `127.0.0.1` only: refused before `allow` and after `deny`, live connections end on `deny`, a partial range closes only what is open, a service bound to a non-loopback host address is unreachable, UDP and oversized ranges are rejected | Decision 5 | `netd.TestParsePorts`, `TestForwardingAndClosing`, `daemon.TestPortGrant*`, `TestPortRangeGrantAndPartialClose`, `cli.TestAllowAndDenyPortCommands` | M95 to M99 | fast and security |
 | netlink | The rtnetlink messages (link up, address, default route) are well formed and kernel errors are parsed | Decision 5 | `netd.TestNetlinkMessagesAreWellFormed`, `TestAckErrorParsing` | n/a | fast |
 
 ## Host-assumption canaries
@@ -106,7 +107,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(94 of 94) on 2026-11-17.
+(99 of 99) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -204,6 +205,11 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M92 | Removing a busy mount ignores the blocking processes | `daemon.TestRemoveBusyForcedAndSwitch` |
 | M93 | An unplanned mount after a hot mount is not detected | `daemon.TestUnplannedMountIsRolledBack` |
 | M94 | Remove leaves the mount in place | `daemon.TestRemoveBusyForcedAndSwitch` |
+| M95 | The grant's listener is created in the host's network namespace, not the sandbox's | `daemon.TestPortGrantReachableOnlyAfterAllowAndRefusedAfterDeny` |
+| M96 | `deny` leaves live connections open | `netd.TestForwardingAndClosing` |
+| M97 | UDP notation is not recognised as UDP | `netd.TestParsePorts` |
+| M98 | The per-grant port cap is off by one | same |
+| M99 | Opening an open port creates a second listener | `netd.TestForwardingAndClosing` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not
@@ -215,7 +221,6 @@ credential read, and the 0700 runtime directory is the primary defence).
 | Spike | Assumption | Design decision | Lands with | Guard test (planned) |
 |---|---|---|---|---|
 | 1.6 | A real agent reaching its real API through the engine | Decision 5 | 5.6 (manual, `e2e.md`) | n/a |
-| 1.7 | A port grant is a listener on the sandbox loopback forwarded to host `127.0.0.1`; reachable only after `allow`, refused after `deny`, other host services unreachable | Decision 5 | 7.1 to 7.3 | security test; mutation: listen before the grant |
 | 1.8 | A real Claude Code and OpenCode through the relay | Decision 4 | manual, `docs/manual-checks.md` | n/a |
 | 1.3 | No unapproved network from inside the sandbox (the control-surface half is done, see the matrix) | Decision 4 | 8.2 | the isolation regression suite |
 | S2 to S4 | Landlock ceiling | `sandbox-hardening` D2 and D3 | deferred to Phase 2 | S2 to S4 spikes remain in the store; revisit triggers in the design |

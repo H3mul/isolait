@@ -151,7 +151,10 @@ func Main(args []string, stdin io.Reader, stderr io.Writer) error {
 		o.Ready = os.NewFile(uintptr(*readyFD), "ready")
 	}
 	stop := make(chan struct{})
-	go func() { io.Copy(io.Discard, stdin); close(stop) }()
+	pf := NewPortForwarder(*netns, o.Logf)
+	defer pf.Close()
+	// stdin carries the daemon's port commands; its closing ends the process. Replies go to stdout.
+	go func() { ServeControl(stdin, os.Stdout, pf); close(stop) }()
 	return RunStage2(o, *tapFD, stop)
 }
 

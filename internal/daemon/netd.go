@@ -24,8 +24,10 @@ type NetTest struct {
 // netEngine is the network engine process of one session. It runs outside the sandbox, in the daemon's
 // namespaces, and ends when the daemon closes its stdin (or dies).
 type netEngine struct {
-	cmd   *exec.Cmd
-	stdin *os.File
+	cmd     *exec.Cmd
+	stdin   *os.File
+	replies chan string // one line per command sent to the engine
+	cmdMu   sync.Mutex  // one command at a time
 
 	mu       sync.Mutex
 	down     string // why the engine is no longer running, empty while it is
@@ -45,6 +47,13 @@ func startNetEngine(exe string, pid int, test *NetTest, stderr *os.File) (*netEn
 		readyW.Close()
 		return nil, err
 	}
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		readyW.Close()
+		stdinR.Close()
+		stdinW.Close()
+		return nil, err
+	}
 	args := []string{"netd", "--netns", fmt.Sprintf("/proc/%d/ns/net", pid), "--ready-fd", "3"}
 	if test != nil {
 		for _, r := range test.Routes {
@@ -60,11 +69,14 @@ func startNetEngine(exe string, pid int, test *NetTest, stderr *os.File) (*netEn
 	cmd := exec.Command(exe, args...)
 	cmd.Env = []string{}
 	cmd.Stdin = stdinR
+	cmd.Stdout = stdoutW
 	tail := &tailBuffer{max: 2048}
 	cmd.Stderr = io.MultiWriter(stderr, tail) // the log, and the reason if the start fails
 	cmd.ExtraFiles = []*os.File{readyW}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if err := cmd.Start(); err != nil {
+		stdoutR.Close()
+		stdoutW.Close()
 		readyW.Close()
 		stdinR.Close()
 		stdinW.Close()
@@ -72,8 +84,17 @@ func startNetEngine(exe string, pid int, test *NetTest, stderr *os.File) (*netEn
 	}
 	readyW.Close()
 	stdinR.Close()
+	stdoutW.Close()
 
-	n := &netEngine{cmd: cmd, stdin: stdinW}
+	n := &netEngine{cmd: cmd, stdin: stdinW, replies: make(chan string, 1)}
+	go func() { // the engine's answers; the channel closes when it exits
+		defer stdoutR.Close()
+		sc := bufio.NewScanner(stdoutR)
+		for sc.Scan() {
+			n.replies <- sc.Text()
+		}
+		close(n.replies)
+	}()
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 	ready := make(chan error, 1)
@@ -166,4 +187,31 @@ func (n *netEngine) pid() int {
 		return 0
 	}
 	return n.cmd.Process.Pid
+}
+
+// command sends one line to the engine and returns its reply text ("ok ..." gives what follows the ok).
+func (n *netEngine) command(line string) (string, error) {
+	if n == nil {
+		return "", errors.New("there is no network engine in this session")
+	}
+	if st := n.status(); st != "up" {
+		return "", fmt.Errorf("the network engine is not running (%s)", st)
+	}
+	n.cmdMu.Lock()
+	defer n.cmdMu.Unlock()
+	if _, err := io.WriteString(n.stdin, line+"\n"); err != nil {
+		return "", fmt.Errorf("the network engine is not reachable: %w", err)
+	}
+	select {
+	case r, ok := <-n.replies:
+		if !ok {
+			return "", errors.New("the network engine exited")
+		}
+		if msg, bad := strings.CutPrefix(r, "err "); bad {
+			return "", errors.New(msg)
+		}
+		return strings.TrimSpace(strings.TrimPrefix(r, "ok")), nil
+	case <-time.After(10 * time.Second):
+		return "", errors.New("the network engine did not answer")
+	}
 }

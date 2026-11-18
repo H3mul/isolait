@@ -28,7 +28,7 @@ type deps struct {
 func realDeps() deps { return deps{paths: config.DefaultPaths, runtime: session.RuntimeBase} }
 
 func sessionCmds(d deps) []*cobra.Command {
-	return []*cobra.Command{startCmd(d), attachCmd(d), execCmd(d), listCmd(d), statusCmd(d), stopCmd(d), mountCmd(d), unmountCmd(d), daemonCmd(), spawnCmd()}
+	return []*cobra.Command{startCmd(d), attachCmd(d), execCmd(d), listCmd(d), statusCmd(d), stopCmd(d), mountCmd(d), unmountCmd(d), allowCmd(d), denyCmd(d), daemonCmd(), spawnCmd()}
 }
 
 // target resolves the session a command acts on: a positional id, else --sid, else the last attached.
@@ -359,4 +359,68 @@ func unmountCmd(d deps) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "detach even if processes still use it (they may keep stale handles)")
 	return cmd
+}
+
+func allowCmd(d deps) *cobra.Command {
+	cmd := &cobra.Command{Use: "allow", Short: "Grant the running session access to something on the host"}
+	cmd.AddCommand(&cobra.Command{
+		Use: "port <port|range>", Short: "Forward sandbox 127.0.0.1:<port> to the host's 127.0.0.1:<port> (TCP)", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base, id, err := target(cmd, d, nil)
+			if err != nil {
+				return err
+			}
+			r, err := daemon.AllowPorts(base, id, args[0])
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			if len(r.Changed) == 0 {
+				fmt.Fprintf(w, "%s is already open\n", args[0])
+			} else {
+				fmt.Fprintf(w, "opened %s: sandbox 127.0.0.1 -> host 127.0.0.1 (TCP); open ports: %s\n", portList(r.Changed), orNone(intsToStrings(r.Open)))
+			}
+			fmt.Fprintln(w, "note: the host service cannot tell the sandbox's connections from your own local ones")
+			return nil
+		},
+	})
+	return cmd
+}
+
+func denyCmd(d deps) *cobra.Command {
+	cmd := &cobra.Command{Use: "deny", Short: "Withdraw access granted with allow"}
+	cmd.AddCommand(&cobra.Command{
+		Use: "port <port|range>", Short: "Close open port grants and end their connections", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base, id, err := target(cmd, d, nil)
+			if err != nil {
+				return err
+			}
+			r, err := daemon.DenyPorts(base, id, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "closed %s; open ports: %s\n", portList(r.Changed), orNone(intsToStrings(r.Open)))
+			return nil
+		},
+	})
+	return cmd
+}
+
+// portList renders ports compactly: a run of consecutive ports as a range.
+func portList(p []int) string {
+	var parts []string
+	for i := 0; i < len(p); {
+		j := i
+		for j+1 < len(p) && p[j+1] == p[j]+1 {
+			j++
+		}
+		if j > i {
+			parts = append(parts, fmt.Sprintf("%d-%d", p[i], p[j]))
+		} else {
+			parts = append(parts, fmt.Sprint(p[i]))
+		}
+		i = j + 1
+	}
+	return strings.Join(parts, ",")
 }

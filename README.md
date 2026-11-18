@@ -189,6 +189,29 @@ Sessions live as long as their init process. They have no idle timeout, and the 
 session. `isolait stop` ends it and releases every process, mount and runtime file; the agent's persistent home
 is kept.
 
+## Letting the agent reach a service on your machine
+
+The sandbox cannot reach anything on your host, including `127.0.0.1`. To let it use a dev server, database or
+similar, grant the port while the session runs:
+
+```sh
+isolait allow port 5432          # sandbox 127.0.0.1:5432 -> host 127.0.0.1:5432
+isolait allow port 3000-3010     # a range, at most 100 ports at once
+isolait deny port 3000-3010      # closes the open ones and ends their connections
+```
+
+`isolait status` lists the open ports. These also work in the leader prompt.
+
+- TCP only; a UDP grant is rejected. Only IPv4 `127.0.0.1` on the host is reachable: a service bound to your LAN
+  address, to `::1` or to a socket file is not, and the sandbox cannot pick a different destination.
+- The sandbox port is the host port. If something inside the sandbox already uses it, the grant fails.
+- A grant is all or nothing: if one port in a range cannot be opened, none stay open. `deny` closes the ports of
+  its range that are open and ignores the rest. Grants end with the session.
+- **Attribution caveat:** to the host service the sandbox's connections look exactly like your own local ones
+  (from `127.0.0.1`, as your user). It cannot tell the agent from you, so it cannot apply a different policy or
+  log who connected. Grant only services you would let the agent use with your own authority; a service with no
+  authentication of its own is fully open to the agent for as long as the port is granted.
+
 ## Network egress
 
 The sandbox has its own network namespace with one interface (`tap0`, `10.0.2.15`) and nothing else: no route to

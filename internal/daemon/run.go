@@ -42,6 +42,7 @@ type sessionState struct {
 	state    func() string // idle, detached or attached
 	net      func() string // the network engine: up, or down with the reason
 	netPID   func() int
+	ports    func() []int // the open port grants
 	spec     Spec
 	plan     *plan.Plan
 	bins     sandbox.Binaries
@@ -54,6 +55,7 @@ func (s *sessionState) status() Status {
 	st := Status{ID: s.spec.ID, State: s.state(), PID: os.Getpid(), Started: s.spec.Started, Workdir: s.spec.Workdir,
 		Roots: s.bins.Roots, Ports: []int{}, EnvNames: s.envNames, Warnings: s.bins.Warnings}
 	st.Network = s.net()
+	st.Ports = s.ports()
 	st.NetPID = s.netPID()
 	if s.spec.LimitsNote != "" {
 		st.Limits = LimitsStatus{Reason: s.spec.LimitsNote}
@@ -164,7 +166,13 @@ func Run(spec Spec) error {
 	}
 	defer attachSrv.Close()
 
-	st := &sessionState{state: tm.State, spec: spec, plan: p, bins: bins, net: func() string { return engine.status() }, netPID: func() int { return engine.pid() }}
+	st := &sessionState{state: tm.State, spec: spec, plan: p, bins: bins, net: func() string { return engine.status() }, netPID: func() int { return engine.pid() },
+		ports: func() []int {
+			if p, err := openPorts(engine); err == nil {
+				return p
+			}
+			return []int{}
+		}}
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
 		st.envNames = append(st.envNames, k)
@@ -207,6 +215,13 @@ func Run(spec Spec) error {
 			st.mu.Lock()
 			defer st.mu.Unlock()
 			return "unmounted", hm.Remove(r.Args[0], r.Args[1] == "force")
+		case "allow-ports", "deny-ports": // args: the port or range
+			if len(r.Args) != 1 {
+				return nil, fmt.Errorf("%s needs a port or range", r.Op)
+			}
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return portOp(engine, r.Op == "allow-ports", r.Args[0])
 		case "stop":
 			once.Do(func() { close(stopping) })
 			return "stopping", nil

@@ -216,6 +216,16 @@ M = [
      "./internal/daemon", "TestUnplannedMountIsRolledBack", True, 120),
     ("M94", "internal/daemon/hotmounts.go", "h.detach(name)\n\th.plan.Remove(dst + \"/.isolait\")\n\th.plan.Remove(dst)\n\tif err", "h.plan.Remove(dst + \"/.isolait\")\n\th.plan.Remove(dst)\n\tif err",
      "./internal/daemon", "TestRemoveBusyForcedAndSwitch", True, 120),
+    ("M95", "internal/netd/ports.go", "ns, err := syscall.Open(f.NetnsPath,", "ns, err := syscall.Open(\"/proc/self/ns/net\",",
+     "./internal/daemon", "TestPortGrantReachableOnlyAfterAllowAndRefusedAfterDeny", True, 120),
+    ("M96", "internal/netd/ports.go", "\t\tc.Close()\n\t}\n\tg.mu.Unlock()", "\t\t_ = c\n\t}\n\tg.mu.Unlock()",
+     "./internal/netd", "TestForwardingAndClosing", False, 60),
+    ("M97", "internal/netd/ports.go", "if strings.Contains(low, \"udp\") {", "if false {",
+     "./internal/netd", "TestParsePorts", False, 60),
+    ("M98", "internal/netd/ports.go", "n > MaxGrantPorts {", "n > MaxGrantPorts+1 {",
+     "./internal/netd", "TestParsePorts", False, 60),
+    ("M99", "internal/netd/ports.go", "if f.grants[port] != nil {\n\t\treturn nil\n\t}", "if false {\n\t\treturn nil\n\t}",
+     "./internal/netd", "TestForwardingAndClosing", False, 60),
 ]
 
 
