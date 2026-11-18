@@ -168,14 +168,18 @@ runs in the sandbox:
   database, name-service config, hosts, timezone, linker and CA configuration.
 - **A private `/tmp`** in memory, a minimal `/dev`, and `/proc` for its own processes.
 - **A persistent home** for the agent under `$XDG_STATE_HOME/isolait/homes/<agent>`, mounted at your home path.
-  Your real home, `~/.ssh` and every other host path are not there.
+  Your real home, `~/.ssh` and every other host path are not there. A new home is seeded from `/etc/skel` (an
+  embedded minimal bash setup if that has none); existing files are never overwritten. Only vanilla bash is set up
+  this way: other shells start bare, and their dotfiles can be placed in `$XDG_STATE_HOME/isolait/homes/<shell>`
+  (for example `homes/zsh`). Importing your own dotfiles or choosing a preferred shell is not supported yet.
 - **The starting directory** at `/workspaces/<name>`, read-write (or read-only with `--ro`), as the working
   directory. Its `.isolait` directory is masked by an empty read-only layer, so a repository's isolait config
   cannot be read or changed from inside.
 - **The agent itself**: its resolved install root (symlinks followed), read-only, and a `/isolait/bin/<name>`
   link so it starts by name. Host `PATH` directories are *not* visible unless you ask (`--inherit-path`, or
   `tools` in the [config](docs/config.md)); symlinks whose targets would not be mounted produce a warning.
-- **An explicit environment**: only `HOME`, `USER`, `LOGNAME`, `PATH` and the variables you declare. A host
+- **An explicit environment**: only `HOME`, `USER`, `LOGNAME`, `PATH`, the locale (`LANG`, `LC_*`, default `LANG=C.UTF-8`), `COLORTERM` and the variables
+  you declare. A host
   secret such as `AWS_SECRET_ACCESS_KEY` is absent unless you pass it.
 
 Hardening: no capabilities, new user, pid, ipc, uts, cgroup and network namespaces, a new terminal session,
