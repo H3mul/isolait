@@ -389,7 +389,7 @@ func mountCmd(d deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "mounted %s at %s (%s)\n", mi.Src, mi.Path, mi.Mode)
+			fmt.Fprintf(cmd.OutOrStdout(), "mounted %s at %s (%s) in session %s\n", mi.Src, mi.Path, mi.Mode, id)
 			return nil
 		},
 	}
@@ -436,7 +436,7 @@ func allowCmd(d deps) *cobra.Command {
 			if len(r.Changed) == 0 {
 				fmt.Fprintf(w, "%s is already open\n", args[0])
 			} else {
-				fmt.Fprintf(w, "opened %s: sandbox 127.0.0.1 -> host 127.0.0.1 (TCP); open ports: %s\n", portList(r.Changed), orNone(intsToStrings(r.Open)))
+				fmt.Fprintf(w, "opened %s in session %s: sandbox 127.0.0.1 -> host 127.0.0.1 (TCP); open ports: %s\n", portList(r.Changed), id, orNone(intsToStrings(r.Open)))
 			}
 			fmt.Fprintln(w, "note: the host service cannot tell the sandbox's connections from your own local ones")
 			return nil
