@@ -18,7 +18,7 @@ row and its test in the same change.
 | `make mutations` | applies every mutation below to a scratch copy and requires a test to fail | when you touch a guard test or a guarded line; before a release |
 
 CI (`.github/workflows/ci.yml`) runs `make check`, `make test`, `make security`, `make canary` and, as a separate gate job, `make isolation` and `make e2e`; it lifts Ubuntu
-24.04's AppArmor userns restriction for the test run only. The workflow has not run on GitHub yet.
+24.04's AppArmor userns restriction for the test run only. The workflow first ran green on GitHub on 2026-11-18 (all four jobs).
 
 **Canaries** are small tests of the kernel, bwrap and systemd behaviours the design depends on. They use bwrap and
 the mount primitive directly and almost none of the product, so an upgrade that changes a behaviour fails them even
