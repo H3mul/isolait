@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/H3mul/isolait/internal/attach"
 	"github.com/H3mul/isolait/internal/config"
 	"github.com/H3mul/isolait/internal/daemon"
 	"github.com/H3mul/isolait/internal/mounts"
 	"github.com/H3mul/isolait/internal/preflight"
+	"github.com/H3mul/isolait/internal/pty"
 	"github.com/H3mul/isolait/internal/session"
 	"github.com/H3mul/isolait/internal/trust"
 	"github.com/spf13/cobra"
@@ -26,7 +28,7 @@ type deps struct {
 func realDeps() deps { return deps{paths: config.DefaultPaths, runtime: session.RuntimeBase} }
 
 func sessionCmds(d deps) []*cobra.Command {
-	return []*cobra.Command{startCmd(d), listCmd(d), statusCmd(d), stopCmd(d), daemonCmd(), spawnCmd()}
+	return []*cobra.Command{startCmd(d), attachCmd(d), execCmd(d), listCmd(d), statusCmd(d), stopCmd(d), daemonCmd(), spawnCmd()}
 }
 
 // target resolves the session a command acts on: a positional id, else --sid, else the last attached.
@@ -131,7 +133,7 @@ func stopCmd(d deps) *cobra.Command {
 }
 
 func startCmd(d deps) *cobra.Command {
-	var ro, inheritEnv, inheritPath, allowUserns bool
+	var ro, inheritEnv, inheritPath, allowUserns, detached bool
 	var envNames []string
 	cmd := &cobra.Command{
 		Use:   "start [flags] <agent> [args...]",
@@ -213,11 +215,15 @@ func startCmd(d deps) *cobra.Command {
 					fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
 				}
 			}
+			if in, ok := cmd.InOrStdin().(*os.File); !detached && ok && pty.IsTerminal(int(in.Fd())) {
+				return attachTo(cmd, d, base, id, attach.HelloMsg{Mode: attach.ModeAgent})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "started %s (idle: the agent is started when you attach)\n", id)
 			return nil
 		},
 	}
 	cmd.Flags().SetInterspersed(false) // flags belong to isolait only until the agent command starts
+	cmd.Flags().BoolVarP(&detached, "detach", "d", false, "start the session without attaching to it")
 	cmd.Flags().BoolVar(&ro, "ro", false, "mount the starting directory read-only")
 	cmd.Flags().StringArrayVar(&envNames, "env", nil, "forward this host environment variable into the sandbox (repeatable)")
 	cmd.Flags().BoolVar(&inheritEnv, "inherit-env", false, "forward the whole host environment (agent sockets are still withheld)")

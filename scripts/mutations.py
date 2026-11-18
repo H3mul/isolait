@@ -120,6 +120,16 @@ M = [
      "./internal/relay", "TestLoneEscapeReachesTheAgent", False, 60),
     ("M46", "internal/relay/relay.go", "s.conn.Send(attach.Frame{Type: attach.Detach})\n\t\t\ts.finish(Result{Detached: true}, nil)", "s.finish(Result{Detached: true}, nil)",
      "./internal/relay", "TestLeaderDetaches", False, 60),
+    ("M47", "internal/cli/attach.go", "\t\tdaemon.SetLast(base, id)", "\t\t_ = daemon.SetLast",
+     "./internal/cli", "TestStartAttachDetachReattachExit", True, 120),
+    ("M48", "internal/cli/attach.go", "\t\tif code := exitStatus(res.Exit); code != 0 {\n\t\t\treturn &ExitError{Code: code}\n\t\t}\n\tcase res.Exit != nil:\n\t\tif code", "\tcase res.Exit != nil:\n\t\tif code",
+     "./internal/cli", "TestStartAttachDetachReattachExit", True, 120),
+    ("M49", "internal/cli/attach.go", "\tcase res.Exit != nil:\n\t\tif code := exitStatus(res.Exit); code != 0 {\n\t\t\treturn &ExitError{Code: code}\n\t\t}\n\tdefault:", "\tcase res.Exit != nil:\n\tdefault:",
+     "./internal/cli", "TestExecOnATerminal", True, 120),
+    ("M50", "internal/cli/session.go", "if in, ok := cmd.InOrStdin().(*os.File); !detached && ok && pty.IsTerminal(int(in.Fd())) {", "if in, ok := cmd.InOrStdin().(*os.File); false && !detached && ok && pty.IsTerminal(int(in.Fd())) {",
+     "./internal/cli", "TestStartAttachDetachReattachExit", True, 120),
+    ("M51", "internal/cli/attach.go", "if !ok1 || !ok2 || !pty.IsTerminal(int(in.Fd())) || !pty.IsTerminal(int(out.Fd())) {", "if !ok1 || !ok2 || (!pty.IsTerminal(int(in.Fd())) && false) || (!pty.IsTerminal(int(out.Fd())) && false) {",
+     "./internal/cli", "TestAttachAndExecNeedATerminal", True, 120),
 ]
 
 

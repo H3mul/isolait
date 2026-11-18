@@ -68,6 +68,8 @@ line exists, its mutation in the same change.
 | 1.8 | The leader key is recognised only from real keyboard input: never inside a bracketed paste (also not when pasting into the prompt), a paste cancels a pending leader, paste markers are stripped unless the agent asked for them, a lone Escape is released by `Flush` and not delayed for ever, input split at any byte boundary gives the same decisions, random paste traffic never produces a detach or prompt | Spec: Leader key from real input only | `term.TestLeaderCommands`, `TestLeaderInsidePasteIsNeverRecognised`, `TestPasteIntoThePromptGoesToThePrompt`, `TestPasteCancelsAPendingLeader`, `TestLoneEscapeIsReleasedByFlush`, `TestSplitInputGivesTheSameEvents`, `TestRandomPastesNeverTriggerTheLeader`, `TestParseLeader` | M35 to M39 | fast |
 | 1.8 | The relay sanitizes agent output before it reaches the terminal (also sequences split across frames) and forwards keyboard input; leader then d detaches; an exit frame ends it with the code; a refused attach is an error; a dropped connection or closed input ends it cleanly; paste markers are kept only for an agent that enabled bracketed paste, and the agent's own paste-mode toggle never reaches the terminal; a lone Escape reaches the agent | Decision 4 (relay) | `relay.TestOutputIsSanitizedAndInputForwarded`, `TestLeaderDetaches`, `TestExitFrameEndsTheRelayWithTheCode`, `TestRefusedAttachIsAnError`, `TestDroppedConnectionAndClosedInputEndTheRelay`, `TestPasteMarkersAreStrippedUnlessTheAgentAsked`, `TestLoneEscapeReachesTheAgent` | M40, M43, M45, M46 | fast |
 | 1.8 | With a real terminal (a pty): raw mode (no local echo), bracketed paste enabled on the real terminal, the hello carries its size, window-size changes are forwarded, and on exit the terminal is restored exactly (termios) and left usable (alternate screen, mouse, cursor, colours reset) | Decision 4 (relay) | `relay.TestRealTerminalRawModePasteModeSizeAndRestore`, `pty.TestRawModeAndRestore`, `pty.TestSizeRoundTrip` | M41, M42, M44 | fast |
+| 1.8 | End to end through the real binary on a real pty: `start` on a terminal attaches and the shell runs inside the sandbox (cwd, a real tty, the terminal's size); the agent's OSC 52 never reaches the terminal; leader then d detaches with status 0 and the session lists as detached; `attach` with no argument uses the last attached session and finds the shell state intact; `status` says attached; the agent's exit status propagates and the session goes idle; the next attach restarts the agent; an alternate-screen agent is restored on reattach and left cleanly on detach | Spec: Daemon-hosted sessions; Detach and attach; List sessions; Session targeting | `cli.TestStartAttachDetachReattachExit`, `cli.TestAlternateScreenAndTerminalRestoreAcrossDetach` | M47 to M50 | security |
+| 1.3 | `exec` on a terminal runs in the same sandbox, propagates the exit status, needs a target (the error lists the sessions), does not start the agent, and the process dies when its client's terminal goes away; `attach` and `exec` refuse to run without a terminal | Spec: Exec in a running sandbox; Session targeting | `cli.TestExecOnATerminal`, `cli.TestAttachAndExecNeedATerminal` | M49, M51 | security |
 
 ## Host-assumption canaries
 
@@ -84,7 +86,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(46 of 46) on 2026-11-17.
+(51 of 51) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -134,6 +136,11 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M44 | Window-size changes are not forwarded | `relay.TestRealTerminalRawModePasteModeSizeAndRestore` |
 | M45 | A held lone Escape is never released | `relay.TestLoneEscapeReachesTheAgent` |
 | M46 | Detach is not sent to the daemon | `relay.TestLeaderDetaches` |
+| M47 | The last attached session is not recorded | `cli.TestStartAttachDetachReattachExit` |
+| M48 | The agent's exit status is not propagated | same |
+| M49 | An exec'd process's exit status is not propagated | `cli.TestExecOnATerminal` |
+| M50 | `start` on a terminal does not attach | `cli.TestStartAttachDetachReattachExit` |
+| M51 | `attach` and `exec` run without a terminal | `cli.TestAttachAndExecNeedATerminal` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not
@@ -147,7 +154,7 @@ credential read, and the 0700 runtime directory is the primary defence).
 | 1.6 | The user-space netstack forwards TCP and answers DNS at the measured rate; the destination policy is checked on the address actually dialed, so a name that resolves to a private address, loopback, link-local or metadata range is refused (DNS rebinding); a refused upstream is a refused guest connect | Decision 5 | 5.1 to 5.5 | `netd` tests plus a security test per blocked range; mutation: skip the dial-time check |
 | 1.6 | Non-DNS UDP, ICMP and IPv6 from the sandbox are dropped; the sandbox sees only the managed interface | Decision 5 | 5.2, 5.4 | security test; mutation: leave IPv6 enabled |
 | 1.7 | A port grant is a listener on the sandbox loopback forwarded to host `127.0.0.1`; reachable only after `allow`, refused after `deny`, other host services unreachable | Decision 5 | 7.1 to 7.3 | security test; mutation: listen before the grant |
-| 1.8 | The PTY relay redraws on attach and handles alt-screen apps (the sanitizer half is done, see the matrix) | Decision 4 | 4.2 | relay tests through a test PTY; mutation: skip the redraw |
+| 1.8 | A real Claude Code and OpenCode through the relay | Decision 4 | manual, `docs/manual-checks.md` | n/a |
 | 1.2, 1.9 | A busy workspace is reported with its blocking processes; `--force` detaches lazily; a protected path or any ancestor is refused by dev+inode, including after a symlink swap | Decisions 2, 3 | 6.1, 6.4, 6.7 | deny-list unit tests plus a security test; mutation: compare paths as strings |
 | 1.3 | No unapproved network from inside the sandbox (the control-surface half is done, see the matrix) | Decision 4 | 8.2 | the isolation regression suite |
 | S2 to S4 | Landlock ceiling | `sandbox-hardening` D2 and D3 | deferred to Phase 2 | S2 to S4 spikes remain in the store; revisit triggers in the design |

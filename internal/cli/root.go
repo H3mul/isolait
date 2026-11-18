@@ -45,7 +45,7 @@ func Root() *cobra.Command {
 		Use:           "isolait",
 		Short:         "Run AI coding agents in a rootless, zero-trust sandbox",
 		SilenceUsage:  true,
-		SilenceErrors: false,
+		SilenceErrors: true, // main prints errors, except an ExitError, which is only an exit status
 	}
 	root.AddCommand(versionCmd(), preflightCmd(), trustCmd(config.DefaultPaths), initCmd())
 	root.AddCommand(sessionCmds(realDeps())...)
