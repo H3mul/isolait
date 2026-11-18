@@ -1,7 +1,7 @@
 # Fast checks run everywhere; the security tier needs real user namespaces (see docs/security-tests.md).
 GO ?= go
 
-.PHONY: all build check test security canary mutations isolation e2e audit-fetch audit-update
+.PHONY: all build check test security canary mutations isolation e2e audit-fetch audit-update audit
 
 all: check test
 
@@ -43,3 +43,6 @@ audit-fetch:
 
 audit-update:
 	./scripts/audit/update.sh
+
+audit:
+	./scripts/audit/run.sh

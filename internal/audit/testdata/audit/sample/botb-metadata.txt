@@ -1,0 +1,7 @@
+[+] Break Out The Box
+[*] Attempting to query metadata endpoint: 'http://169.254.169.254:8080/'
+[*] Attempting to query metadata endpoint: 'http://169.254.169.254/'
+[*] Attempting to query metadata endpoint: 'http://metadata.google.internal/'
+[*] Attempting to query metadata endpoint: 'http://100.100.100.200/'
+[*] Attempting to query metadata endpoint: 'https://kubernetes.default'
+[+] Finished

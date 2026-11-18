@@ -15,6 +15,9 @@ row and its test in the same change.
 | `make canary` | only the **host-assumption canaries** (`internal/canary`) | after a kernel, bwrap or systemd upgrade, and in CI |
 | `make isolation` | the **isolation gate**: the curated tests for no capabilities, mounts, host paths, unapproved network, control-socket access and nested user namespaces; fails if any is skipped | CI gate; after any change to the sandbox, broker or network |
 | `make e2e` | `cli.TestFullWorkflow`: start, detach, attach, exec, mounts, ports, agent exit ends the session, prepare-then-run, stop through the real binary | before a release; CI; run on WSL2 and native Linux |
+| `make audit-fetch` | downloads the pinned third-party audit tools into `~/.cache/isolait-audit/<sha256>/`, verifying each checksum first | before `make audit`; CI |
+| `make audit` | runs linpeas, deepce and botb inside a throwaway isolait session (own runtime, state and config directories) and judges their output with `internal/audit`; results in `build/audit/<date>/` | release tags (`.github/workflows/audit.yml`); on demand after a kernel or bubblewrap upgrade |
+| `make audit-update` | prints the proposed `tools.lock` diff for the newest upstream files; never writes the lock | when bumping a pin |
 | `make mutations` | applies every mutation below to a scratch copy and requires a test to fail | when you touch a guard test or a guarded line; before a release |
 
 CI (`.github/workflows/ci.yml`) runs `make check`, `make test`, `make security`, `make canary` and, as a separate gate job, `make isolation` and `make e2e`; it lifts Ubuntu
@@ -270,3 +273,17 @@ directories), with the tool mounted read-only. Last run: 2026-11-18, WSL2 kernel
 These tools are heuristics: a clean report is not proof of safety, and the audit found a real gap that the tools did not
 flag (it came from a hand probe). A repeatable audit (pinned tools, deterministic probes on every push, the full tool run on release
 tags) is specified in the change `security-audit-tests`; this section will be regenerated from its results.
+
+### Supply-chain rules for the audit tools
+
+- The tools are untrusted third-party code: they run only inside an isolait session, are never piped to a shell and never run in CI with secrets (the audit workflow has `contents: read` only).
+- `scripts/audit/tools.lock` pins name, version, URL, sha256 and size; `make audit-fetch` verifies the checksum before anything else touches a file and refuses on a mismatch. `latest` URLs are not pins.
+- Pins change only through a reviewed pull request, using the output of `make audit-update`.
+- `internal/audit/testdata/audit/known-findings.txt` lists understood findings (id, reason, owner); an entry that no longer occurs is reported so the list shrinks. The "created during the run" rule: a socket reported by a tool that is not in the pre-run listing is the tool's own side effect (the gpg-agent case), one that was there before is a host leak.
+
+### Release checklist
+
+1. `make check test security canary isolation e2e mutations` green.
+2. Push the tag `vX.Y.Z`: the `audit` workflow runs; the release is published only after it is green.
+3. After a kernel or bubblewrap upgrade, run the audit on demand: GitHub Actions, `audit`, "Run workflow", or `make audit-fetch audit` locally.
+4. Refresh the README "Security audit" blurb from `build/audit/<date>/summary.md`.

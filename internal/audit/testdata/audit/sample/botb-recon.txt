@@ -1,0 +1,5 @@
+[+] Break Out The Box
+[+] Performing Container Recon
+[+] Searching /proc/* for data
+[+] Checking ENV Variables for secrets
+[+] Finished

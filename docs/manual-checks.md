@@ -53,3 +53,14 @@ On WSL2 the sandbox now shows empty read-only directories at `/usr/lib/wsl/drive
 `/usr/lib/modules/<kernel>`; `isolait status` lists them as `masked`. git, node, python3 and go run unchanged
 (`sandbox.TestDeveloperToolsRunUnderTheFilter`). Not tried: GPU compute, which keeps its libraries in `/usr/lib/wsl/lib`
 and so does not work in a session (documented in the README). Run `nvidia-smi` in a session on a GPU host to confirm.
+
+## First full audit run (security-audit-tests 3.5)
+
+2026-11-18 (WSL2 6.18.58.1, tools as pinned in `scripts/audit/tools.lock`: linpeas 20261117-8bfcfa5c, deepce 420b1d1ddb63,
+botb 1.8.0; `make audit` from the Claude Code tool shell): 19 assertions held, 0 failed. botb's `-find-sockets` again
+reported the gpg-agent sockets under `/run/user/<uid>/gnupg`: they were created during the run by linpeas's own gpg
+call (absent from the pre-run listing), so they are recorded, not failed. The audit's runtime, state and config
+directories were separate and removed on exit, including after Ctrl-C (checked by interrupting a run: no `/tmp/isolait-audit.*`
+directory or new session remained). Caveat: the tool shell itself runs under a seccomp filter that the sandbox inherits, so
+`Seccomp: 2` in the report is not proof that the filter is isolait's; `sandbox.TestSeccompDenyListInTheSession` is. Repeat the run
+from a plain terminal (audit-findings-hardening 4.2).

@@ -1,0 +1,6 @@
+/run/user/UID/gnupg/S.gpg-agent
+/run/user/UID/gnupg/S.gpg-agent.browser
+/run/user/UID/gnupg/S.gpg-agent.extra
+/run/user/UID/gnupg/S.gpg-agent.ssh
+/run/user/UID/gnupg/S.keyboxd
+/run/user/UID/gnupg/S.scdaemon

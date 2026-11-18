@@ -1,0 +1,9 @@
+[+] Break Out The Box
+[+] Hunting Down UNIX Domain Sockets from: /
+[!] Valid Socket: /run/user/UID/gnupg/S.gpg-agent
+[!] Valid Socket: /run/user/UID/gnupg/S.gpg-agent.browser
+[!] Valid Socket: /run/user/UID/gnupg/S.gpg-agent.extra
+[!] Valid Socket: /run/user/UID/gnupg/S.gpg-agent.ssh
+[!] Valid Socket: /run/user/UID/gnupg/S.keyboxd
+[!] Valid Socket: /run/user/UID/gnupg/S.scdaemon
+[+] Finished

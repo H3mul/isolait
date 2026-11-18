@@ -43,14 +43,14 @@ func TestFetchScript(t *testing.T) {
 	}
 	// cached: still ok when the source is gone
 	os.Remove(good)
-	if out, err := run(lock("good 1 file://"+good+" "+sha+" 5")); err != nil || !strings.Contains(out, "cached") {
+	if out, err := run(lock("good 1 file://" + good + " " + sha + " 5")); err != nil || !strings.Contains(out, "cached") {
 		t.Errorf("cache not used: %v\n%s", err, out)
 	}
 	// tampered cache entry is replaced or refused, never trusted
 	os.Chmod(filepath.Dir(stored), 0o755)
 	os.Chmod(stored, 0o644)
 	os.WriteFile(stored, []byte("evil"), 0o644)
-	if out, err := run(lock("good 1 file://"+good+" "+sha+" 5")); err == nil {
+	if out, err := run(lock("good 1 file://" + good + " " + sha + " 5")); err == nil {
 		t.Errorf("tampered cache entry with no source accepted:\n%s", out)
 	}
 	if _, err := os.Stat(stored); err == nil {

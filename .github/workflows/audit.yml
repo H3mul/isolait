@@ -1,0 +1,48 @@
+name: audit
+
+# The third-party container-escape and privilege-escalation tools (linpeas, deepce, botb, pinned in
+# scripts/audit/tools.lock) run inside an isolait session. Not on pushes or pull requests: the fetch needs the
+# network and the run takes several minutes; the cheap deterministic probes already run in the `security` job.
+# A release is blocked on a green run of this workflow. Run it by hand (workflow_dispatch) after a kernel or
+# bubblewrap upgrade.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read # the tools are untrusted code: no secrets, no write access
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Load the tun driver
+        run: sudo modprobe tun || true
+      - name: Start a systemd user manager
+        run: |
+          sudo loginctl enable-linger "$USER" || true
+          sudo systemctl start "user@$(id -u).service" || true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/isolait-audit
+          key: audit-tools-${{ hashFiles('scripts/audit/tools.lock') }}
+      - name: Fetch the pinned tools (every file is re-verified against its checksum, cached or not)
+        run: make audit-fetch
+      - name: Run the audit
+        run: make audit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-${{ github.sha }}
+          path: build/audit/
+          retention-days: 30

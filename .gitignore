@@ -1,3 +1,4 @@
 .claude
 /isolait
 __pycache__/
+/build/

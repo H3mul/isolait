@@ -1,0 +1,38 @@
+
+                      ##         .
+                ## ## ##        ==
+             ## ## ## ##       ===
+         /"""""""""""""""""\___/ ===
+    ~~~ {~~ ~~~~ ~~~ ~~~~ ~~~ ~ /  ===- ~~~
+         \______ X           __/
+           \    \         __/
+            \____\_______/
+          __
+     ____/ /__  ___  ____  ________
+    / __  / _ \/ _ \/ __ \/ ___/ _ \   ENUMERATE
+   / /_/ /  __/  __/ /_/ / (__/  __/  ESCALATE
+   \__,_/\___/\___/ .___/\___/\___/  ESCAPE
+                 /_/
+
+ Docker Enumeration, Escalation of Privileges and Container Escapes (DEEPCE)
+ by stealthcopter
+
+===================================( Enumerating Platform )===================================
+[+] Inside Container ........ No
+[+] User .................... user
+[+] Groups .................. user nobody
+[+] Sudo .................... Password required
+[+] Container tools ......... Yes
+/usr/sbin/docker
+/usr/sbin/kubectl
+/usr/sbin/podman
+[+] Docker Executable ....... /usr/sbin/docker
+[+] Docker version .......... 29.10.0
+[+] Rootless ................ No
+[+] User in Docker group .... No
+[+] Docker Sock ............. Not Found
+[+] Docker Version .......... 29.10.0
+[+] CVE–2019–13139 .......... No
+[+] CVE–2019–5736 ........... No
+==================================( Enumerating Containers )==================================
+==============================================================================================

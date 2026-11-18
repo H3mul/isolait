@@ -1,0 +1,2 @@
+# id | reason | owner
+# Findings the audit reports that are understood and accepted. An entry that no longer occurs is reported so the list shrinks.

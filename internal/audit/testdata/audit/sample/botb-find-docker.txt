@@ -1,0 +1,5 @@
+[+] Break Out The Box
+[+] Looking for Dockerd
+[*] Looking for Docker ENV variables
+[+] Hunting Docker Socks
+[+] Finished

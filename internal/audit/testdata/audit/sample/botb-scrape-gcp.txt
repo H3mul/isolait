@@ -1,0 +1,6 @@
+[+] Break Out The Box
+[+] Attempting to connect to:  169.254.169.254:80
+[ERROR]  dial tcp 169.254.169.254:80: connect: connection refused
+[+] Attempting to connect to:  169.254.169.254:8080
+[ERROR]  dial tcp 169.254.169.254:8080: connect: connection refused
+[+] Finished
