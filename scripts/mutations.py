@@ -135,7 +135,7 @@ M = [
     ("M109", "internal/daemon/run.go", "	if spec.Detached {\n		if err := tm.StartNow(", "	if false {\n		if err := tm.StartNow(",
      "./internal/daemon", "TestDetachedShellRunsAndEndingItEndsTheSession|TestPrepareThenRun", True, 120),
     ("M110", "internal/sandbox/sandbox.go", 'flags = append(flags, "--seccomp", strconv.Itoa(3+len(files)-1))', "",
-     "./internal/sandbox", "TestSeccompDenyListInTheSession|TestKeyringsAreNotSharedWithTheHost", True, 120),
+     "./internal/sandbox", "TestSeccompDenyListInTheSession|TestKeyringsAreNotSharedWithTheHost"+"|TestAuditProbes", True, 120),
     ("M111", "internal/sandbox/baseline.go", '		{Kind: plan.RoBind, Src: "/dev/null", Dst: "/proc/keys"},\n', "",
      "./internal/sandbox", "TestKeyringsAreNotSharedWithTheHost", True, 120),
     ("M112", "internal/sandbox/seccomp.go", '"keyctl", "add_key", "request_key"}}', '"add_key", "request_key"}}',

@@ -869,3 +869,34 @@ func TestForeignSubmountsAreMasked(t *testing.T) {
 		}
 	}
 }
+
+// The deterministic probes of the 2026-11-18 container audit, run on every security-tier pass (the third-party tools
+// are run on release tags; see security-audit-tests). Each line is something the audit tools looked at.
+func TestAuditProbes(t *testing.T) {
+	kv := runJob(t, job{Script: `echo capeff=$(awk '/^CapEff/{print $2}' /proc/self/status)
+echo capbnd=$(awk '/^CapBnd/{print $2}' /proc/self/status)
+echo capamb=$(awk '/^CapAmb/{print $2}' /proc/self/status)
+echo nonewprivs=$(awk '/^NoNewPrivs/{print $2}' /proc/self/status)
+echo seccomp=$(awk '/^Seccomp:/{print $2}' /proc/self/status)
+for p in /run /mnt /init /dev/kvm /var/run/docker.sock /run/docker.sock; do echo "absent_$(echo $p | tr / _)=$([ -e $p ] && echo present || echo absent)"; done
+echo sockets=$(find / -xdev -type s -not -path '/proc/*' -not -path '/usr/*' 2>/dev/null | wc -l)
+echo userns=$(unshare -U true 2>/dev/null && echo allowed || echo denied)
+echo mount=$(mount -t tmpfs tmpfs /tmp 2>/dev/null && echo allowed || echo denied)
+echo procs=$(ls /proc | grep -c '^[0-9]')
+`})
+	want := map[string]string{
+		"capeff": "0000000000000000", "capbnd": "0000000000000000", "capamb": "0000000000000000",
+		"nonewprivs": "1", "seccomp": "2", // 2 = a filter is installed (isolait's; TestSeccompDenyListInTheSession shows it is the deny list)
+		"absent__run": "absent", "absent__mnt": "absent", "absent__init": "absent", "absent__dev_kvm": "absent",
+		"absent__var_run_docker.sock": "absent", "absent__run_docker.sock": "absent",
+		"sockets": "0", "userns": "denied", "mount": "denied",
+	}
+	for k, w := range want {
+		if kv[k] != w {
+			t.Errorf("%s = %q, want %q", k, kv[k], w)
+		}
+	}
+	if n, _ := strconv.Atoi(kv["procs"]); n > 10 {
+		t.Errorf("the sandbox sees %d processes; its own pid namespace should hold only the session's", n)
+	}
+}
