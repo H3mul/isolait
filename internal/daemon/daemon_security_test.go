@@ -363,7 +363,7 @@ func TestAttachAndExecInTheRealSandbox(t *testing.T) {
 
 	// a second shell in the same sandbox: same mounts, and the control surface is nowhere to be found. /usr is not
 	// scanned: it is the host's read-only system tree (huge on CI runner images) and never holds a session socket.
-	script := "echo ws=$(ls /workspaces); n=$(find /workspaces /tmp /home /etc /isolait /dev -name '*.sock' 2>/dev/null | wc -l); echo sockets=$n; " +
+	script := "echo ws=$(ls /workspaces); found=$(find /workspaces /tmp /home /etc /isolait /dev -name '*.sock' 2>/dev/null); echo sockets=$(echo -n \"$found\" | grep -c .); echo \"$found\" | sed 's/^/socketpath=/'; " +
 		"for p in " + session.SocketPath(e.base, spec.ID) + " " + session.AttachPath(e.base, spec.ID) + " " + e.base + "; do [ -e $p ] && echo reachable=$p; done; echo done-exec"
 	ec, eraw, er := dialAttach(t, e, spec.ID, attach.HelloMsg{Mode: attach.ModeExec, Argv: []string{"sh", "-c", script}, Term: "xterm", Cols: 80, Rows: 24})
 	if !er.OK {
