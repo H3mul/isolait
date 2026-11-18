@@ -12,7 +12,7 @@ import (
 )
 
 // Task 8.1: the whole user workflow through the real binary, in order: start, detach, attach, exec, add and
-// remove a mount, open and close a port, agent exit and restart, stop. `make e2e` runs it; CI runs it on native
+// remove a mount, open and close a port, agent exit (the session ends), prepare a detached shell then attach, stop. `make e2e` runs it; CI runs it on native
 // Linux and it is also run on WSL2.
 func TestFullWorkflow(t *testing.T) {
 	e := newE2E(t)
@@ -89,22 +89,30 @@ func TestFullWorkflow(t *testing.T) {
 	run("--sid", sid, "deny", "port", port)
 	execOut(sid, "exec 3<>/dev/tcp/127.0.0.1/"+port+" 2>/dev/null && echo STILL-OPEN || echo port-closed", "port-closed")
 
-	step("agent exit and restart in the same sandbox")
+	step("unmount")
+	run("--sid", sid, "unmount", "lib")
+	execOut(sid, "ls /workspaces", "api")
+
+	step("agent exit ends the session")
 	p3 := e.onPTY("attach")
 	p3.type_("exit 0\r")
 	p3.exitCode()
-	if out := run("list"); !strings.Contains(out, "idle") {
+	if out := e.waitNoSessions(); !strings.Contains(out, "no sessions running") {
 		t.Fatalf("after the agent exited:\n%s", out)
 	}
+	if out, _ := e.plain("--sid", sid, "status"); !strings.Contains(out, "does not exist") {
+		t.Fatalf("status of an ended session:\n%s", out)
+	}
+
+	step("prepare a detached shell, then run in it")
+	out := run("start", "-d", "sh")
+	sid = sidRe.FindString(out)
+	run("--sid", sid, "mount", "--ro", lib)
 	p4 := e.onPTY("attach")
 	p4.type_("echo r\"\"esult cat=$(cat /workspaces/lib/f) en\"\"d\r")
 	p4.waitFor("result cat=lib-content end")
 	p4.type_(leaderDetach)
 	p4.exitCode()
-
-	step("unmount")
-	run("--sid", sid, "unmount", "lib")
-	execOut(sid, "ls /workspaces", "api")
 
 	step("stop leaves nothing behind")
 	run("stop", sid)

@@ -95,7 +95,7 @@ M = [
     ("M33", "internal/daemon/terminals.go", "if cols < 1 || cols > 1000 {", "if false {",
      "./internal/daemon", "TestTermIsSanitizedAndSizeClamped", False, 60),
     ("M34", "internal/daemon/terminals.go", "dst.conn.SendJSON(attach.Exit, attach.ExitInfo{Code: e.Code, Signal: e.Signal})", "_ = e",
-     "./internal/daemon", "TestAgentExitIsReportedAndReattachRestartsIt", False, 60),
+     "./internal/daemon", "TestAgentExitIsReportedAndEndsTheSession", False, 60),
     ("M35", "internal/term/input.go", "case f.inPaste:\n\t\t\tf.dest(b)\n\t\tcase f.inPrompt:", "case f.inPrompt:",
      "./internal/term", "TestLeaderInsidePasteIsNeverRecognised|TestRandomPastesNeverTriggerTheLeader", False, 60),
     ("M36", "internal/term/input.go", "if f.agentPaste && !f.inPrompt {\n\t\t\tf.addData(EvData, pasteEnd...)", "if !f.inPrompt {\n\t\t\tf.addData(EvData, pasteEnd...)",

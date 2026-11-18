@@ -20,3 +20,21 @@ In a project directory, with your usual agent installed:
 
 Not yet run on a real agent. Automated stand-ins (a shell, a scripted alternate-screen program, a pty as the terminal)
 are in `internal/cli/attach_security_test.go` and `internal/relay/relay_test.go`.
+
+## Launcher scripts: `isolait start claude` (session-ux-pickups 1.5)
+
+`/usr/sbin/claude` is a wrapper (`exec /opt/claude-code/bin/claude "$@"`). Run `isolait start claude` in a project directory:
+Claude Code's interface appears, and the start prints `warning: claude is a launcher script; also exposing /opt/claude-code/bin/claude`.
+
+2026-11-18 (isolait at the 1.4 commit, Claude Code under `/opt/claude-code`): `isolait start -d claude` then
+`isolait status` lists `/opt/claude-code/bin/claude` as a tool root and prints the warning (automated by
+`sandbox.TestLauncherInSystemDirRunsInSandbox` against a wrapper in a system directory). The interactive start on a
+real terminal is **not yet run**: it needs a person at a terminal.
+
+## tmux inside a session (session-ux-pickups 5.5)
+
+`isolait start` (bash), then `tmux`: it needs only the session's pty and `/tmp` (its socket is `/tmp/tmux-<uid>/default`),
+so no extra mount or exposure. A second shell (`isolait exec -- bash`) reaches the same tmux server.
+
+2026-11-18 (tmux 3.8): `daemon.TestTmuxRunsInsideASession` starts tmux as the agent, sees its command run, and reaches the
+server from an exec'd shell. No gap found. Run it by hand once on a real terminal for the full-screen interface.

@@ -25,19 +25,19 @@ go build -o isolait .
 
 ## Quick start
 
-These examples are run by the test suite as written, from a script (so, not from a terminal: `start` then creates
-an *idle* session and does not attach; in a terminal it attaches, see [Attach, detach and exec](#attach-detach-and-exec)).
+These examples are run by the test suite as written, from a script (so, not from a terminal: `start` then runs the
+agent detached and does not attach; in a terminal it attaches, see [Attach, detach and exec](#attach-detach-and-exec)).
 `<sid>` is the session id, `<dir>` the project directory and `<age>` how long the session has been up.
 
 ```console
 $ isolait start sh
-started <sid> (idle: the agent is started when you attach)
+started <sid> (detached)
 $ isolait list
-ID     STATE  WORKSPACES  AGE
-<sid>  idle   api:rw      <age>
+ID     STATE     WORKSPACES  AGE
+<sid>  detached  api:rw      <age>
 $ isolait status <sid>
 session  <sid>
-state    idle
+state    detached
 workdir  <dir>
 mounts
   /workspaces/api  rw  (<dir>)
@@ -82,8 +82,7 @@ belong to a background daemon, so they survive the terminal:
   back, with the terminal restored. If you close the terminal instead, the session simply carries on.
 - **`isolait attach [sid]`** attaches again, to the most recently used session unless you name one. It shows the agent's
   current screen at your current size: the agent is asked to repaint, and an agent that was on the alternate
-  screen is put back there. If the agent had exited, attaching starts it again in the same sandbox. One client is
-  attached to the agent at a time.
+  screen is put back there. One client is attached to the agent at a time.
 - **`isolait exec [--sid sid] -- command [args...]`** runs a command in the session's sandbox on your terminal,
   with the same mounts, environment and restrictions as the agent: a second shell, for example
   `isolait exec -- bash`. It ends when the command ends, when you detach, or when you close the terminal.
@@ -197,10 +196,16 @@ directory, is refused. Limits: a launcher that builds its target from a variable
 (`$(dirname "$0")/../lib`) is not followed; add its install tree with `tools = ["/opt/claude-code"]` in the
 [config](docs/config.md), otherwise the agent exits with status 127.
 
-Sessions live as long as their init process. They have no idle timeout, and the agent exiting does not end the
-session. `isolait stop` ends it, and `isolait kill-server` ends every session (it prints each id, says
-`no sessions running` and succeeds when there are none, and fails only if a session could not be stopped); either releases every process, mount and runtime file; the agent's persistent home
-is kept.
+A session lives exactly as long as its agent process: when the agent exits the session ends and releases every
+process, mount, port grant and runtime file (the agent's persistent home is kept). There is no idle session and no
+idle timeout. If the agent exits within 2 seconds of `start -d` (a broken launcher, a missing binary), `start`
+fails with the agent's exit status and the last 2 KiB of its output and leaves nothing behind; an attached `start`
+shows the output and exits with the status, as a shell would.
+
+To prepare a session before running anything, start a shell: `isolait start -d` runs `bash`, then add mounts and
+ports (`isolait mount`, `isolait allow port`), then `isolait attach` and run the agent from that shell. `tmux` also
+works inside a session. `isolait stop` ends a session and `isolait kill-server` ends every session (it prints each
+id, says `no sessions running` and succeeds when there are none, and fails only if a session could not be stopped).
 
 ## Letting the agent reach a service on your machine
 
@@ -262,7 +267,7 @@ make test        # fast tier: units, parsers, protocol, plan (no kernel features
 make security    # also runs the sandbox on the real kernel (needs user namespaces and bwrap)
 make canary      # only the host-assumption canaries: run after a kernel, bwrap or systemd upgrade
 make isolation   # the CI gate over the sandbox's core guarantees (fails if any of its tests is skipped)
-make e2e         # the whole workflow through the real binary: start, attach, mounts, ports, restart, stop
+make e2e         # the whole workflow through the real binary: start, attach, mounts, ports, agent exit, prepare-then-run, stop
 make mutations   # apply deliberate regressions to a scratch copy; every one must fail a test
 ```
 

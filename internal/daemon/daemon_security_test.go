@@ -524,3 +524,33 @@ func TestPrepareThenRun(t *testing.T) {
 		t.Errorf("ports %v, want [18080]", st.Ports)
 	}
 }
+
+// 5.5: tmux runs inside a session with nothing but a pty and /tmp (its socket lives there): no extra mounts.
+func TestTmuxRunsInsideASession(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("no tmux on this host")
+	}
+	e := newEnv(t)
+	spec := e.spec(t, "tmux")
+	spec.Agent = []string{"tmux", "-f", "/dev/null", "new-session", "echo tmux-r''esult; echo second > /tmp/seen; sleep 20"}
+	spec.Detached = false
+	if err := Launch(spec, os.Args[0]); err != nil {
+		t.Skipf("cannot launch here: %v", err)
+	}
+	defer Stop(e.base, spec.ID)
+	c, raw, r := dialAttach(t, e, spec.ID, attach.HelloMsg{Mode: attach.ModeAgent, Term: "xterm-256color", Cols: 100, Rows: 30})
+	if !r.OK {
+		t.Fatalf("attach: %+v", r)
+	}
+	if out := readUntil(t, c, raw, "tmux-result"); !strings.Contains(out, "tmux-result") {
+		t.Errorf("tmux did not run the command: %q", out)
+	}
+	// the tmux server's socket is in /tmp; a second shell in the sandbox reaches the same server
+	ec, eraw, er := dialAttach(t, e, spec.ID, attach.HelloMsg{Mode: attach.ModeExec, Argv: []string{"sh", "-c", "tmux ls; cat /tmp/seen; echo done-exec"}, Term: "xterm", Cols: 80, Rows: 24})
+	if !er.OK {
+		t.Fatalf("exec: %+v", er)
+	}
+	if eo := readUntil(t, ec, eraw, "done-exec"); !strings.Contains(eo, "0:") || !strings.Contains(eo, "second") {
+		t.Errorf("tmux server not shared inside the sandbox: %q", eo)
+	}
+}

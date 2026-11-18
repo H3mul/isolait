@@ -60,6 +60,20 @@ func newE2E(t *testing.T) *e2e {
 	return e
 }
 
+// waitNoSessions waits for the session teardown that follows an agent exit to finish.
+func (e *e2e) waitNoSessions() string {
+	e.t.Helper()
+	var out string
+	for i := 0; i < 100; i++ {
+		out, _ = e.plain("list")
+		if strings.Contains(out, "no sessions running") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return out
+}
+
 // plain runs isolait without a terminal.
 func (e *e2e) plain(args ...string) (string, error) {
 	c := exec.Command(e.bin, args...)
@@ -183,15 +197,13 @@ func TestStartAttachDetachReattachExit(t *testing.T) {
 		t.Errorf("the agent's exit status 3 became %d", code)
 	}
 	p2.waitFor("the agent exited with status 3")
-	if out, _ := e.plain("list"); !strings.Contains(out, "idle") {
-		t.Errorf("after the agent exited the session is idle:\n%s", out)
+	// the session ended with its agent: nothing is left and there is nothing to attach to
+	if out := e.waitNoSessions(); !strings.Contains(out, "no sessions running") {
+		t.Errorf("after the agent exited the session is gone:\n%s", out)
 	}
-	// the next attach restarts the agent in the same sandbox
-	p3 := e.onPTY("attach")
-	p3.type_("echo r\"\"esult again=$(pwd) en\"\"d\r")
-	p3.waitFor("result again=/workspaces/api end")
-	p3.type_(leaderDetach)
-	p3.exitCode()
+	if out, err := e.plain("attach"); err == nil || !strings.Contains(out, "no sessions running") {
+		t.Errorf("attach after the end: %v\n%s", err, out)
+	}
 }
 
 func TestAlternateScreenAndTerminalRestoreAcrossDetach(t *testing.T) {
@@ -229,8 +241,8 @@ func TestExecOnATerminal(t *testing.T) {
 		t.Errorf("exec exit status %d, want 4", code)
 	}
 	// exec is not use of the session and does not change its state
-	if out, _ := e.plain("list"); !strings.Contains(out, "idle") {
-		t.Errorf("an exec must not start the agent:\n%s", out)
+	if out, _ := e.plain("list"); !strings.Contains(out, "detached") {
+		t.Errorf("an exec must not change the session's state:\n%s", out)
 	}
 
 	// closing the terminal ends the exec'd process: it does not linger in the sandbox
