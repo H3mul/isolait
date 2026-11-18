@@ -64,3 +64,7 @@ directories were separate and removed on exit, including after Ctrl-C (checked b
 directory or new session remained). Caveat: the tool shell itself runs under a seccomp filter that the sandbox inherits, so
 `Seccomp: 2` in the report is not proof that the filter is isolait's; `sandbox.TestSeccompDenyListInTheSession` is. Repeat the run
 from a plain terminal (audit-findings-hardening 4.2).
+
+2026-11-18 (manual, plain terminal, `make audit-fetch audit`): the audit ran to completion with the pinned tools. This
+closes audit-findings-hardening 4.2: the keyring (F1) and driver-store (F2) findings no longer reproduce, and the
+seccomp filter is isolait's own.
