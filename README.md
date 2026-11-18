@@ -182,8 +182,13 @@ termination when the daemon exits, and nested user namespaces blocked unless you
 Network access is described under [Network egress](#network-egress).
 
 Agents installed as a wrapper script (for example `/usr/sbin/claude` doing `exec /opt/claude-code/bin/claude`)
-need the real install tree mounted too, since only the resolved file's own directory is exposed. Add it with
-`tools = ["/opt/claude-code"]` in the [config](docs/config.md); without it the agent exits with status 127.
+are followed: if the agent is a short `#!` text file, the absolute executables it runs (an `exec` target or a
+command at the start of a line, no variables) are also exposed read-only, to a depth of 3 and at most 8 targets.
+They are listed under `tool roots` in `isolait status`, and `start` prints `warning: <agent> is a launcher
+script; also exposing <path>`. A target inside isolait's own directories, or one that contains your home
+directory, is refused. Limits: a launcher that builds its target from a variable or reads files next to itself
+(`$(dirname "$0")/../lib`) is not followed; add its install tree with `tools = ["/opt/claude-code"]` in the
+[config](docs/config.md), otherwise the agent exits with status 127.
 
 Sessions live as long as their init process. They have no idle timeout, and the agent exiting does not end the
 session. `isolait stop` ends it and releases every process, mount and runtime file; the agent's persistent home
