@@ -100,7 +100,7 @@ func ResolveBinaries(o BinOptions) (Binaries, error) {
 			}
 		}
 		b.bind(m, root)
-		b.Warnings = append(b.Warnings, fmt.Sprintf("warning: %s is a launcher script; also exposing %s", filepath.Base(agent), root))
+		b.Warnings = append(b.Warnings, fmt.Sprintf("%s is a launcher script; also exposing %s", filepath.Base(agent), root))
 	}
 
 	// filtered host PATH, opt-in
