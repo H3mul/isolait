@@ -238,3 +238,29 @@ credential read, and the 0700 runtime directory is the primary defence).
 | 1.6 | A real agent reaching its real API through the engine | Decision 5 | 5.6 (manual, `e2e.md`) | n/a |
 | 1.8 | A real Claude Code and OpenCode through the relay | Decision 4 | manual, `docs/manual-checks.md` | n/a |
 | S2 to S4 | Landlock ceiling | `sandbox-hardening` D2 and D3 | deferred to Phase 2 | S2 to S4 spikes remain in the store; revisit triggers in the design |
+
+## Security audit
+
+The sandbox has been audited from the inside with public container-escape and privilege-escalation tools, not only with
+its own tests. Each tool ran as the agent of a throwaway isolait session (separate runtime, state and config
+directories), with the tool mounted read-only. Last run: 2026-11-18, WSL2 kernel 6.18.58.1, isolait at the
+`session-ux-pickups` commits.
+
+| Tool (as downloaded, sha256 prefix) | What it checks | Result |
+|---|---|---|
+| [linpeas](https://github.com/peass-ng/PEASS-ng) `linpeas.sh` (`07c54b206a3c0483`) | privilege-escalation vectors, capabilities, protections, container and cloud detection, sockets, network, kernel exploit registry | no capabilities, `NoNewPrivs` set, no container runtime socket, no kernel exploit matched, no cloud metadata, only `lo` and `tap0`; nothing notable in the system, process, network and user sections |
+| [deepce](https://github.com/stealthcopper/deepce) `deepce.sh` (`a99f9dfe6509facc`) | Docker enumeration, escalation and escape | no Docker socket, user not in the docker group, escape CVE checks negative |
+| [botb](https://github.com/brompwnie/botb) `botb-linux-amd64` (`3aae4a2bf41aedaa`) | break-out-the-box: container sockets, metadata services, Kubernetes secrets, recon | no Docker socket, no metadata service reachable, no Kubernetes secrets. Its "valid socket" report was a false positive: the sockets were created inside the sandbox by linpeas's own `gpg` run |
+| hand probes | capabilities, namespaces, host paths, mounts, sockets, keyrings | host home, `/run`, `/mnt`, `/init`, `/dev/kvm`, docker sockets absent; user namespaces and `mount` blocked; PID namespace shows only the session's processes |
+
+**Known findings, not yet fixed** (change `audit-findings-hardening`):
+
+- **Kernel keyrings are shared with the host user.** From inside the sandbox, host keys that grant user-read permission
+  could be read and changed, and keys could be added to or removed from the host user keyring (verified with canary
+  keys; default-permission keys held). The fix is a syscall filter plus masking `/proc/keys`.
+- **On WSL2, `/usr` carries the Windows driver store mount** (`/usr/lib/wsl/drivers`, read-only) into the sandbox.
+- isolait does not install a seccomp filter yet; the fix above adds one.
+
+These tools are heuristics: a clean report is not proof of safety, and the audit found a real gap that the tools did not
+flag (it came from a hand probe). A repeatable audit (pinned tools, deterministic probes on every push, the full tool run on release
+tags) is specified in the change `security-audit-tests`; this section will be regenerated from its results.

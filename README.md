@@ -4,26 +4,59 @@ Run AI coding agents (Claude Code, OpenCode, ...) in a rootless, zero-trust sand
 sandbox starts instantly, needs no root, no VM and no container runtime, and every permission the agent has is
 an explicit, user-granted, revocable grant.
 
-> **Status:** Phase 1 is in progress. Sessions, the sandbox baseline, resource limits, attaching a terminal to
-> the agent (detach, reattach, exec, the leader prompt) and the control commands below work. Hot-mounting more
-> directories, network access and port grants are the next steps, so the sandbox has no network device yet.
+## Why another AI sandbox
 
-## Requirements
+Most sandboxes are fixed when they start: you pick the permissions, restart, and lose the agent's context. isolait
+starts from a secure base (the agent sees one project directory, a private home, no host network, no secrets) and
+lets you open it up as you go, while the agent keeps running: mount another directory, open a port to a local
+service, change what it can reach. Every change takes effect immediately and ends with the session; nothing is
+widened by default and nothing needs a restart. Grants are made by you from outside, or from the leader prompt
+inside the terminal, never by the agent.
 
-- Linux (or WSL2), unprivileged user namespaces enabled, kernel with the new mount API (5.12 or newer)
-- [bubblewrap](https://github.com/containers/bubblewrap) 0.8 or newer (`bwrap`)
-- `/dev/net/tun` (for the network engine)
-- Optional: a systemd user manager, used to apply resource limits to each session
+> **Status:** Phase 1 is in progress. Sessions, the sandbox baseline, resource limits, attaching a terminal to the
+> agent, hot mounts, port grants and outbound network access work. Egress policy levels and home profiles are
+> proposed, not built.
 
-`isolait preflight` checks all of this and explains how to fix anything missing.
+- [Security audit and tech stack](#security-audit-and-tech-stack)
+- [What it can do](#what-it-can-do)
+- [Quick start](#quick-start)
+- [Tool documentation](#tool-documentation)
+- [Install](#install)
+- [For developers](#for-developers)
 
-## Build
+## Security audit and tech stack
 
-```sh
-go build -o isolait .
-```
+The sandbox was audited from the inside with public container-escape and privilege-escalation tools (linpeas,
+deepce, botb) plus hand probes, run as the agent of throwaway sessions. Last run 2026-11-18, WSL2 kernel
+6.18.58.1. The tools found no capabilities, no container runtime socket, no reachable metadata service and no
+kernel exploit match. The hand probes found real gaps the tools did not flag, which are open
+(change `audit-findings-hardening`):
+
+- kernel keyrings are shared with the host user, and isolait installs no seccomp filter yet;
+- on WSL2, `/usr` carries the Windows driver store mount (read-only) into the sandbox.
+
+These tools are heuristics: a clean report is not proof of safety. Tools, checksums and per-tool results:
+[docs/security-tests.md](docs/security-tests.md#security-audit).
+
+Stack: Go; user, pid, ipc, uts, cgroup and network namespaces through bubblewrap; a userspace network engine on
+gVisor netstack in a separate per-session process; systemd user scopes for resource limits.
+
+## What it can do
+
+- **Hot mounts.** Add and remove directories (read-write or read-only) while the agent runs. Protected paths
+  (home, isolait's own directories) are refused and the live mount table is verified after every change.
+- **Port grants.** Let the sandbox reach one host TCP port on `127.0.0.1` (a dev server, a database), then close
+  it again, without a restart.
+- **Network egress.** Outbound TCP and DNS through a userspace network stack; private, loopback, metadata and
+  host addresses are blocked.
+- **Resource limits.** Every session runs in a systemd user scope with a process cap (default 4096) and optional
+  memory and CPU caps.
+- **Attach, detach and exec.** Sessions belong to a background daemon, so they survive the terminal. Detach with
+  a leader key, reattach later, run a second shell in the same sandbox.
 
 ## Quick start
+
+Install first (see [Install](#install)).
 
 These examples are run by the test suite as written, from a script (so, not from a terminal: `start` then runs the
 agent detached and does not attach; in a terminal it attaches, see [Attach, detach and exec](#attach-detach-and-exec)).
@@ -66,6 +99,8 @@ before the agent command:
 `start` refuses `/`, your home directory and any directory that contains or sits inside isolait's own config,
 state or runtime directory.
 
+## Tool documentation
+
 ### Exploring the commands
 
 Every command prints its help when you run it without the arguments it needs (`isolait allow`, `isolait mount`, `isolait deny port`, `isolait exec` all do, with exit status 0); a wrong number of arguments or an unknown subcommand prints the usage line and the `--help` hint with exit status 1. `isolait --help` lists everything.
@@ -77,7 +112,7 @@ either, the command acts on the most recently used session (like tmux: attaching
 `attach` prefers the most recently used session that nobody is attached to. `isolait list` shows the most recently used
 first. With no session running the commands say `no sessions running`.
 
-## Attach, detach and exec
+### Attach, detach and exec
 
 Run in a terminal, `isolait start <agent>` starts the session and attaches your terminal to the agent. Sessions
 belong to a background daemon, so they survive the terminal:
@@ -97,7 +132,7 @@ belong to a background daemon, so they survive the terminal:
 works as usual, but nothing that scrolled away is replayed when you reattach. Run `isolait attach` inside `tmux` or
 `screen` if you want scrollback across sessions.
 
-### The leader key
+#### The leader key
 
 | Keys | Effect |
 |---|---|
@@ -111,7 +146,7 @@ The leader is recognised only in real keyboard input. Your terminal is kept in b
 paste is never mistaken for typed keys: a leader byte inside a paste is sent to the agent unchanged, and paste
 markers reach the agent only if it asked for them. Change the key with `leader` in the [config](docs/config.md).
 
-### The prompt
+#### The prompt
 
 Leader then `:` opens a one-line prompt on the bottom row and runs isolait commands against the session you are
 in, with the same arguments as on the command line (`status`, `list`, `stop`, and the mount and port commands as
@@ -121,16 +156,27 @@ the terminal's alternate screen, so the agent's screen is untouched when it clos
 the alternate screen it overwrites the bottom row and asks the agent to repaint. Agent output is held while the
 prompt is open and shown after it closes.
 
-### Terminal safety
 
-Agent output is filtered before it reaches your terminal. Clipboard writes (OSC 52), window and icon title changes,
-colour and other terminal queries (every OSC except hyperlinks), device control strings (DCS, such as sixel),
-application and privacy strings (APC, PM, SOS), window manipulation and its reports (`CSI ... t`) and the
-answerback request are dropped; colours, cursor movement, hyperlinks and the alternate screen pass unchanged.
-Sequences split across reads are handled. This is a filter, not a terminal emulator: it narrows what an agent can
-do to your terminal and does not claim to eliminate terminal injection.
+#### Terminal safety
 
-## Mounting more directories
+Agent output is filtered before it reaches your terminal: clipboard writes (OSC 52), title changes, terminal
+queries, device control strings and window manipulation are dropped; colours, cursor movement, hyperlinks and the
+alternate screen pass. This narrows what an agent can do to your terminal; it is a filter, not a terminal
+emulator, and does not claim to eliminate terminal injection. Full list: [docs/sandbox-internals.md](docs/sandbox-internals.md#terminal-safety).
+
+### What the agent sees
+
+The starting directory at `/workspaces/<name>` (read-write, or read-only with `--ro`), a read-only system
+(`/usr`, a minimal `/etc`), a private in-memory `/tmp`, a minimal `/dev`, a persistent per-agent home under
+`$XDG_STATE_HOME/isolait/homes/<agent>`, the agent's own install root read-only, and an explicit environment
+(`HOME`, `USER`, `LOGNAME`, `PATH`, the locale and what you pass with `--env`). Your real home, `~/.ssh` and
+every other host path are not there. Hardening: no capabilities, new user, pid, ipc, uts, cgroup and network
+namespaces, nested user namespaces blocked unless `--allow-userns`. A session lives exactly as long as its agent
+process. Agents installed as launcher scripts are followed; `isolait stop` ends a session and
+`isolait kill-server` ends every session. The full list, launcher-script rules and startup failure behaviour are in
+[docs/sandbox-internals.md](docs/sandbox-internals.md).
+
+### Mounting more directories
 
 While a session runs you can add and remove directories without restarting the agent. Run these from a shell,
 or type them in the leader prompt:
@@ -164,54 +210,7 @@ Residual risks to weigh before mounting:
 - `unmount --force` detaches lazily: a process still using the mount keeps working with stale handles.
 - Mounts are made on your behalf by the session's broker; the sandbox itself can never mount anything.
 
-## What the sandbox contains
-
-The agent sees only this, all built from one plan that is checked against the live mount table before anything
-runs in the sandbox:
-
-- **System directories**, read-only (`/usr` and the `/bin`, `/lib`, ... links), and a minimal `/etc`: user
-  database, name-service config, hosts, timezone, linker and CA configuration.
-- **A private `/tmp`** in memory, a minimal `/dev`, and `/proc` for its own processes.
-- **A persistent home** for the agent under `$XDG_STATE_HOME/isolait/homes/<agent>`, mounted at your home path.
-  Your real home, `~/.ssh` and every other host path are not there. A new home is seeded from `/etc/skel` (an
-  embedded minimal bash setup if that has none); existing files are never overwritten. Only vanilla bash is set up
-  this way: other shells start bare, and their dotfiles can be placed in `$XDG_STATE_HOME/isolait/homes/<shell>`
-  (for example `homes/zsh`). Importing your own dotfiles or choosing a preferred shell is not supported yet.
-- **The starting directory** at `/workspaces/<name>`, read-write (or read-only with `--ro`), as the working
-  directory. Its `.isolait` directory is masked by an empty read-only layer, so a repository's isolait config
-  cannot be read or changed from inside.
-- **The agent itself**: its resolved install root (symlinks followed), read-only, and a `/isolait/bin/<name>`
-  link so it starts by name. Host `PATH` directories are *not* visible unless you ask (`--inherit-path`, or
-  `tools` in the [config](docs/config.md)); symlinks whose targets would not be mounted produce a warning.
-- **An explicit environment**: only `HOME`, `USER`, `LOGNAME`, `PATH`, the locale (`LANG`, `LC_*`, default `LANG=C.UTF-8`), `COLORTERM` and the variables
-  you declare. A host
-  secret such as `AWS_SECRET_ACCESS_KEY` is absent unless you pass it.
-
-Hardening: no capabilities, new user, pid, ipc, uts, cgroup and network namespaces, a new terminal session,
-termination when the daemon exits, and nested user namespaces blocked unless you opt in with `--allow-userns`.
-Network access is described under [Network egress](#network-egress).
-
-Agents installed as a wrapper script (for example `/usr/sbin/claude` doing `exec /opt/claude-code/bin/claude`)
-are followed: if the agent is a short `#!` text file, the absolute executables it runs (an `exec` target or a
-command at the start of a line, no variables) are also exposed read-only, to a depth of 3 and at most 8 targets.
-They are listed under `tool roots` in `isolait status`, and `start` prints `warning: <agent> is a launcher
-script; also exposing <path>`. A target inside isolait's own directories, or one that contains your home
-directory, is refused. Limits: a launcher that builds its target from a variable or reads files next to itself
-(`$(dirname "$0")/../lib`) is not followed; add its install tree with `tools = ["/opt/claude-code"]` in the
-[config](docs/config.md), otherwise the agent exits with status 127.
-
-A session lives exactly as long as its agent process: when the agent exits the session ends and releases every
-process, mount, port grant and runtime file (the agent's persistent home is kept). There is no idle session and no
-idle timeout. If the agent exits within 2 seconds of `start -d` (a broken launcher, a missing binary), `start`
-fails with the agent's exit status and the last 2 KiB of its output and leaves nothing behind; an attached `start`
-shows the output and exits with the status, as a shell would.
-
-To prepare a session before running anything, start a shell: `isolait start -d` runs `bash`, then add mounts and
-ports (`isolait mount`, `isolait allow port`), then `isolait attach` and run the agent from that shell. `tmux` also
-works inside a session. `isolait stop` ends a session and `isolait kill-server` ends every session (it prints each
-id, says `no sessions running` and succeeds when there are none, and fails only if a session could not be stopped).
-
-## Letting the agent reach a service on your machine
+### Letting the agent reach a service on your machine
 
 The sandbox cannot reach anything on your host, including `127.0.0.1`. To let it use a dev server, database or
 similar, grant the port while the session runs:
@@ -234,7 +233,7 @@ isolait deny port 3000-3010      # closes the open ones and ends their connectio
   log who connected. Grant only services you would let the agent use with your own authority; a service with no
   authentication of its own is fully open to the agent for as long as the port is granted.
 
-## Network egress
+### Network egress
 
 The sandbox has its own network namespace with one interface (`tap0`, `10.0.2.15`) and nothing else: no route to
 the host's interfaces, no host loopback. A userspace network stack (gVisor netstack) in a separate, hardened
@@ -253,44 +252,46 @@ per-session process (`isolait netd`, no mount authority, seccomp-filtered) conne
 Verified against the real internet: HTTPS to the model API, `git` over HTTPS and `npm install` work; see the
 manual record in the OpenSpec store (`spikes/e2e.md`).
 
-## Resource limits
+### Resource limits
 
 Each session runs in its own systemd user scope: `limits.pids` (default 4096) bounds a fork bomb, and you can cap
 `limits.memory` and `limits.cpu`. Without a systemd user manager the session still starts, and `isolait status`
 shows `limits: unavailable (<reason>)`. See [docs/config.md](docs/config.md#resource-limits).
 
-## Security audit
-
-The sandbox has been audited from the inside with public container-escape and privilege-escalation tools, not only with
-its own tests. Each tool ran as the agent of a throwaway isolait session (separate runtime, state and config
-directories), with the tool mounted read-only. Last run: 2026-11-18, WSL2 kernel 6.18.58.1, isolait at the
-`session-ux-pickups` commits.
-
-| Tool (as downloaded, sha256 prefix) | What it checks | Result |
-|---|---|---|
-| [linpeas](https://github.com/peass-ng/PEASS-ng) `linpeas.sh` (`07c54b206a3c0483`) | privilege-escalation vectors, capabilities, protections, container and cloud detection, sockets, network, kernel exploit registry | no capabilities, `NoNewPrivs` set, no container runtime socket, no kernel exploit matched, no cloud metadata, only `lo` and `tap0`; nothing notable in the system, process, network and user sections |
-| [deepce](https://github.com/stealthcopper/deepce) `deepce.sh` (`a99f9dfe6509facc`) | Docker enumeration, escalation and escape | no Docker socket, user not in the docker group, escape CVE checks negative |
-| [botb](https://github.com/brompwnie/botb) `botb-linux-amd64` (`3aae4a2bf41aedaa`) | break-out-the-box: container sockets, metadata services, Kubernetes secrets, recon | no Docker socket, no metadata service reachable, no Kubernetes secrets. Its "valid socket" report was a false positive: the sockets were created inside the sandbox by linpeas's own `gpg` run |
-| hand probes | capabilities, namespaces, host paths, mounts, sockets, keyrings | host home, `/run`, `/mnt`, `/init`, `/dev/kvm`, docker sockets absent; user namespaces and `mount` blocked; PID namespace shows only the session's processes |
-
-**Known findings, not yet fixed** (change `audit-findings-hardening`):
-
-- **Kernel keyrings are shared with the host user.** From inside the sandbox, host keys that grant user-read permission
-  could be read and changed, and keys could be added to or removed from the host user keyring (verified with canary
-  keys; default-permission keys held). The fix is a syscall filter plus masking `/proc/keys`.
-- **On WSL2, `/usr` carries the Windows driver store mount** (`/usr/lib/wsl/drivers`, read-only) into the sandbox.
-- isolait does not install a seccomp filter yet; the fix above adds one.
-
-These tools are heuristics: a clean report is not proof of safety, and the audit found a real gap that the tools did not
-flag (it came from a hand probe). A repeatable audit (pinned tools, deterministic probes on every push, the full tool run on release
-tags) is specified in the change `security-audit-tests`; this section will be regenerated from its results.
-
-## Configuration
+### Configuration
 
 Global and per-workspace TOML config, and the trust model for a repository's own `.isolait/config`:
 [docs/config.md](docs/config.md).
 
-## Tests
+## Install
+
+Requirements:
+
+- Linux (or WSL2), unprivileged user namespaces enabled, kernel with the new mount API (5.12 or newer)
+- [bubblewrap](https://github.com/containers/bubblewrap) 0.8 or newer (`bwrap`)
+- `/dev/net/tun` (for the network engine)
+- Optional: a systemd user manager, used to apply resource limits to each session
+
+`isolait preflight` checks all of this and explains how to fix anything missing.
+
+Build and install:
+
+```sh
+go build -o isolait .
+```
+
+Put the binary on your `PATH`, then run `isolait preflight`.
+
+On WSL2 the sandbox works with the `tun` driver loaded; resource limits need the systemd user manager
+(`systemd=true` in `/etc/wsl.conf`), otherwise sessions still start and `isolait status` shows
+`limits: unavailable`.
+
+## For developers
+
+Specs, design, tasks and the feasibility spikes live in the `isolait` OpenSpec store (see `openspec/config.yaml`);
+changes are proposed there before they are built.
+
+Test tiers:
 
 ```sh
 make test        # fast tier: units, parsers, protocol, plan (no kernel features needed)
@@ -303,7 +304,3 @@ make mutations   # apply deliberate regressions to a scratch copy; every one mus
 
 [docs/security-tests.md](docs/security-tests.md) maps every security assumption validated by the feasibility
 spikes to the test that guards it and the mutation that proves the test fails when the assumption breaks.
-
-## Project
-
-Specs, design, tasks and the feasibility spikes live in the `isolait` OpenSpec store (see `openspec/config.yaml`).
