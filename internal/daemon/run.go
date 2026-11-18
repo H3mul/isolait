@@ -68,6 +68,9 @@ func (s *sessionState) status() Status {
 		st.Limits = SelfUsage()
 	}
 	for _, e := range s.plan.Entries() {
+		if e.Kind == plan.RoTmpfs {
+			st.Masked = append(st.Masked, e.Dst)
+		}
 		if e.Kind == plan.Workspace {
 			mode := "rw"
 			if e.RO {

@@ -42,3 +42,14 @@ so no extra mount or exposure. A second shell (`isolait exec -- bash`) reaches t
 
 2026-11-18 (tmux 3.8): `daemon.TestTmuxRunsInsideASession` starts tmux as the agent, sees its command run, and reaches the
 server from an exec'd shell. No gap found. Run it by hand once on a real terminal for the full-screen interface.
+
+## Kernel information and WSL submounts (audit-findings-hardening 3.1, 3.3)
+
+2026-11-18 (WSL2 6.18.58.1, host `kptr_restrict=0`, `dmesg_restrict=0`): from inside a session `/proc/kallsyms` shows only
+zero addresses (the user is not root), `dmesg` is refused (`syslog` is denied) and `/dev/kmsg` is not present, so no
+further `/proc` files are masked (`sandbox.TestKernelLogAndAddressesAreNotReadable` guards this).
+
+On WSL2 the sandbox now shows empty read-only directories at `/usr/lib/wsl/drivers`, `/usr/lib/wsl/lib` and
+`/usr/lib/modules/<kernel>`; `isolait status` lists them as `masked`. git, node, python3 and go run unchanged
+(`sandbox.TestDeveloperToolsRunUnderTheFilter`). Not tried: GPU compute, which keeps its libraries in `/usr/lib/wsl/lib`
+and so does not work in a session (documented in the README). Run `nvidia-smi` in a session on a GPU host to confirm.

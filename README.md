@@ -175,7 +175,9 @@ namespaces, nested user namespaces blocked unless `--allow-userns`. A session li
 process. A seccomp filter denies the calls a developer's tools do not need and an attacker does (kernel keyrings,
 `perf_event_open`, `bpf`, cross-process memory access, the mount family, kernel log); `io_uring` returns ENOSYS so
 runtimes fall back to epoll, and `/proc/keys` is masked. `perf` and `bpftrace` do not work in a session; `ptrace`
-(so `strace` and `gdb` on the agent's own processes) does. Agents installed as launcher scripts are followed; `isolait stop` ends a session and
+(so `strace` and `gdb` on the agent's own processes) does. On WSL2, host mounts of other filesystems below the system directories (the Windows driver store,
+`/usr/lib/wsl/lib`) are hidden behind empty read-only directories and listed as `masked` by `isolait status`; as a
+result GPU compute does not work in a session. Agents installed as launcher scripts are followed; `isolait stop` ends a session and
 `isolait kill-server` ends every session. The full list, launcher-script rules and startup failure behaviour are in
 [docs/sandbox-internals.md](docs/sandbox-internals.md).
 

@@ -137,7 +137,7 @@ func Compare(sandbox, host []Mount, p *plan.Plan) []string {
 		// bwrap binds are recursive: host submounts under the source reappear under the destination
 		if e.Kind == plan.RoBind || e.Kind == plan.Bind {
 			for _, h := range host {
-				if strings.HasPrefix(h.Point, strings.TrimRight(e.Src, "/")+"/") {
+				if strings.HasPrefix(h.Point, strings.TrimRight(e.Src, "/")+"/") && !underMask(e.Dst+strings.TrimPrefix(h.Point, e.Src), p) {
 					child := e.Dst + strings.TrimPrefix(h.Point, e.Src)
 					if !expected[child] {
 						expected[child] = true
@@ -152,8 +152,14 @@ func Compare(sandbox, host []Mount, p *plan.Plan) []string {
 			}
 		}
 	}
+	masked := map[string]bool{} // a mask sits on top of the host submount the recursive bind carried in: two mounts, by design
+	for _, e := range p.Entries() {
+		if e.Kind == plan.RoTmpfs {
+			masked[e.Dst] = true
+		}
+	}
 	for pt, n := range count {
-		if n > 1 {
+		if n > 2 || (n > 1 && !masked[pt]) {
 			bad("%d mounts are stacked on %s", n, pt)
 		}
 	}
@@ -217,6 +223,12 @@ func checkEntry(e plan.Entry, m Mount, host []Mount, bad func(string, ...any)) {
 	case plan.Mask:
 		want("ro")
 		checkSource(e, m, host, bad)
+	case plan.RoTmpfs:
+		want("ro")
+		want("nosuid")
+		if m.FSType != "tmpfs" {
+			bad("%s should be an empty tmpfs but is %s", e.Dst, m.FSType)
+		}
 	case plan.Tmpfs:
 		want("nosuid")
 		want("nodev")
@@ -273,4 +285,14 @@ func optString(m Mount) string {
 	}
 	sort.Strings(o)
 	return strings.Join(o, ",")
+}
+
+// underMask reports whether path lies strictly below a masked directory: the mask hides it.
+func underMask(path string, p *plan.Plan) bool {
+	for _, e := range p.Entries() {
+		if e.Kind == plan.RoTmpfs && strings.HasPrefix(path, e.Dst+"/") {
+			return true
+		}
+	}
+	return false
 }

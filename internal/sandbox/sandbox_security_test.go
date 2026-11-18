@@ -22,6 +22,7 @@ import (
 
 	"github.com/H3mul/isolait/internal/broker"
 	"github.com/H3mul/isolait/internal/initshim"
+	"github.com/H3mul/isolait/internal/mountcheck"
 	"github.com/H3mul/isolait/internal/mounts"
 	"github.com/H3mul/isolait/internal/plan"
 )
@@ -792,6 +793,79 @@ PY
 		n, _, e := syscall.Syscall6(unix.SYS_KEYCTL, 11, uintptr(ids[i]), uintptr(unsafe.Pointer(&buf[0])), 64, 0, 0)
 		if e != 0 || string(buf[:n]) != want {
 			t.Errorf("host canary %d changed: %v %q", ids[i], e, buf[:n])
+		}
+	}
+}
+
+// Compatibility under the filter (audit-findings-hardening 1.5): ordinary developer tools still work. Tools that
+// are not installed are reported and skipped, never counted as passing.
+func TestDeveloperToolsRunUnderTheFilter(t *testing.T) {
+	smoke := []struct{ tool, cmd string }{
+		{"git", "cd /tmp && git init -q x && git -C x status -s"},
+		{"node", "node -e 'console.log(1+1)'"},
+		{"python3", "python3 -c 'print(2)'"},
+		{"go", "GOFLAGS=-mod=mod HOME=/tmp go env GOROOT"},
+		{"strace", "strace -f true"},
+	}
+	var script strings.Builder
+	var present []string
+	for _, s := range smoke {
+		if _, err := exec.LookPath(s.tool); err != nil {
+			t.Logf("skipped %s: not installed on this host", s.tool)
+			continue
+		}
+		present = append(present, s.tool)
+		fmt.Fprintf(&script, "(%s) >/dev/null 2>&1; echo %s=$?\n", s.cmd, s.tool)
+	}
+	if len(present) == 0 {
+		t.Skip("none of the tools is installed")
+	}
+	kv := runJob(t, job{Script: script.String(), SysDirs: nil})
+	for _, tool := range present {
+		if kv[tool] != "0" {
+			t.Errorf("%s exited %q under the filter (127 = not visible in the sandbox, anything else = denied call?)", tool, kv[tool])
+		}
+	}
+}
+
+// Kernel information (task 3.1): the host kernel log and kernel addresses must not be readable from inside.
+func TestKernelLogAndAddressesAreNotReadable(t *testing.T) {
+	kv := runJob(t, job{Script: `echo dmesg=$(dmesg 2>&1 | wc -l)
+echo kmsg=$([ -e /dev/kmsg ] && echo present || echo absent)
+echo kallsyms=$(awk '$1 != "0000000000000000"' /proc/kallsyms 2>/dev/null | wc -l)
+`})
+	if kv["kmsg"] != "absent" {
+		t.Errorf("/dev/kmsg is visible in the sandbox")
+	}
+	if kv["kallsyms"] != "0" {
+		t.Errorf("/proc/kallsyms shows %s real kernel addresses", kv["kallsyms"])
+	}
+	if kv["dmesg"] != "1" { // the one line is the error message
+		t.Errorf("dmesg printed %s lines, want only its refusal", kv["dmesg"])
+	}
+}
+
+// Foreign host mounts below the system directories (on WSL2 the Windows driver store) are hidden by an empty
+// read-only directory, and Launch's mount check accepts that.
+func TestForeignSubmountsAreMasked(t *testing.T) {
+	f, err := os.Open("/proc/self/mountinfo")
+	if err != nil {
+		t.Skip(err)
+	}
+	table, _ := mountcheck.Parse(f)
+	f.Close()
+	foreign := ForeignSubmounts(table, SystemDirs)
+	if len(foreign) == 0 {
+		t.Skip("this host has no foreign mounts below its system directories")
+	}
+	var s strings.Builder
+	for i, pt := range foreign {
+		fmt.Fprintf(&s, "echo n%d=$(ls -A %s | wc -l)\necho w%d=$(touch %s/x 2>/dev/null && echo writable || echo readonly)\n", i, pt, i, pt)
+	}
+	kv := runJob(t, job{Script: s.String()})
+	for i, pt := range foreign {
+		if kv[fmt.Sprintf("n%d", i)] != "0" || kv[fmt.Sprintf("w%d", i)] != "readonly" {
+			t.Errorf("%s: %s entries, %s; want an empty read-only directory", pt, kv[fmt.Sprintf("n%d", i)], kv[fmt.Sprintf("w%d", i)])
 		}
 	}
 }

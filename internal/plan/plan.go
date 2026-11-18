@@ -22,6 +22,7 @@ const (
 	Symlink   Kind = "symlink"   // bwrap --symlink Src Dst; Src is the link target; not a mount
 	Dir       Kind = "dir"       // bwrap --dir Dst; not a mount
 	Workspace Kind = "workspace" // mounted later by the broker under /workspaces/<name>; Src is the host dir
+	RoTmpfs   Kind = "ro-tmpfs"  // bwrap --tmpfs Dst then --remount-ro Dst: an empty read-only directory hiding what is below
 	Mask      Kind = "mask"      // empty read-only layer the broker mounts over a workspace's .isolait
 )
 
@@ -57,7 +58,7 @@ func (p *Plan) Add(e Entry) error {
 		if e.Src == "" || strings.ContainsRune(e.Src, 0) {
 			return fmt.Errorf("plan: symlink %s needs a target", e.Dst)
 		}
-	case Tmpfs, Proc, Dev, Dir:
+	case Tmpfs, RoTmpfs, Proc, Dev, Dir:
 	default:
 		return fmt.Errorf("plan: unknown kind %q", e.Kind)
 	}
@@ -110,6 +111,8 @@ func (p Plan) Args() []string {
 			a = append(a, "--bind", e.Src, e.Dst)
 		case Tmpfs:
 			a = append(a, "--tmpfs", e.Dst)
+		case RoTmpfs:
+			a = append(a, "--tmpfs", e.Dst, "--remount-ro", e.Dst)
 		case Proc:
 			a = append(a, "--proc", e.Dst)
 		case Dev:

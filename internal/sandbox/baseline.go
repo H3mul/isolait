@@ -7,7 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
 
+	"github.com/H3mul/isolait/internal/mountcheck"
 	"github.com/H3mul/isolait/internal/plan"
 )
 
@@ -75,6 +79,19 @@ func BuildPlan(s Spec) (*plan.Plan, error) {
 		case fi.IsDir():
 			if err := add(plan.Entry{Kind: plan.RoBind, Src: d, Dst: d}); err != nil {
 				return nil, err
+			}
+		}
+	}
+	// foreign host mounts below the system directories (the WSL driver store, GPU overlays) would ride along with the
+	// recursive read-only bind; an empty read-only directory goes over each
+	if f, err := os.Open("/proc/self/mountinfo"); err == nil {
+		table, perr := mountcheck.Parse(f)
+		f.Close()
+		if perr == nil {
+			for _, pt := range ForeignSubmounts(table, SystemDirs) {
+				if err := add(plan.Entry{Kind: plan.RoTmpfs, Dst: pt}); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -153,4 +170,43 @@ func Args(s Spec, p *plan.Plan, extra ...string) []string {
 		a = append(a, "--chdir", s.Chdir)
 	}
 	return a
+}
+
+// foreignFS are filesystem types that bring in something that is not part of the host's system: the WSL driver
+// store (9p, drvfs), GPU library overlays, network and fuse mounts. A real partition (ext4, xfs, ...) mounted below a
+// system directory is part of the system and stays.
+func foreignFS(t string) bool {
+	switch t {
+	case "9p", "drvfs", "virtiofs", "overlay", "nfs", "nfs4", "cifs", "fuse":
+		return true
+	}
+	return strings.HasPrefix(t, "fuse.")
+}
+
+// ForeignSubmounts returns the mount points below the given system directories whose filesystem is foreign,
+// outermost first (a foreign mount inside a masked one is hidden by the mask already).
+func ForeignSubmounts(table []mountcheck.Mount, dirs []string) []string {
+	var out []string
+	for _, m := range table {
+		if !foreignFS(m.FSType) {
+			continue
+		}
+		for _, d := range dirs {
+			if !strings.HasPrefix(m.Point, strings.TrimRight(d, "/")+"/") {
+				continue
+			}
+			hidden := false
+			for _, o := range table {
+				if o.Point != m.Point && foreignFS(o.FSType) && strings.HasPrefix(m.Point, o.Point+"/") && strings.HasPrefix(o.Point, strings.TrimRight(d, "/")+"/") {
+					hidden = true
+				}
+			}
+			if !hidden {
+				out = append(out, m.Point)
+			}
+			break
+		}
+	}
+	sort.Strings(out)
+	return slices.Compact(out)
 }

@@ -123,6 +123,9 @@ func statusCmd(d deps) *cobra.Command {
 			fmt.Fprintf(w, "limits      %s\n", limitsLine(st.Limits))
 			_, denied, _ := sandbox.SeccompProgram() // the same build starts every session, so the count is the session's
 			fmt.Fprintf(w, "seccomp     on (%d syscalls denied)\n", denied)
+			if len(st.Masked) > 0 {
+				fmt.Fprintf(w, "masked      %s\n", strings.Join(st.Masked, ", "))
+			}
 			for _, warn := range st.Warnings {
 				fmt.Fprintf(w, "warning  %s\n", warn)
 			}

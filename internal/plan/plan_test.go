@@ -141,3 +141,14 @@ func TestNoMountArgumentsOutsidePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRoTmpfsRendersAReadOnlyRemount(t *testing.T) {
+	var p Plan
+	if err := p.Add(Entry{Kind: RoTmpfs, Dst: "/usr/lib/wsl/drivers"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--tmpfs", "/usr/lib/wsl/drivers", "--remount-ro", "/usr/lib/wsl/drivers"}
+	if got := p.Args(); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}

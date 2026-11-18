@@ -58,6 +58,7 @@ type Status struct {
 	EnvNames []string     `json:"env"`      // variable names passed in (never values)
 	Warnings []string     `json:"warnings"` // start-time warnings, e.g. dangling links
 	Limits   LimitsStatus `json:"limits"`
+	Masked   []string     `json:"masked,omitempty"`  // host submounts under system directories hidden by an empty read-only directory
 	Network  string       `json:"network"`           // up, or down with the reason
 	NetPID   int          `json:"net_pid,omitempty"` // the network engine process, for debugging
 }

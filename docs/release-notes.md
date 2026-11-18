@@ -7,6 +7,8 @@
 - Every session now runs under a seccomp deny list (see `internal/sandbox/seccomp.go`, one comment per group);
   `isolait status` shows `seccomp: on (<n> syscalls denied)`. Denied calls fail with EPERM, `io_uring` with ENOSYS.
   `perf` and `bpftrace` stop working inside a session by design.
+- Foreign host mounts below system directories (WSL2: driver store, GPU libraries, kernel modules overlay) are hidden by an
+  empty read-only directory and listed under `masked` in `isolait status`. GPU compute does not work in a session.
 - `/proc/keys` and `/proc/key-users` are masked: the sandbox no longer lists the host user's kernel keys.
 
 ### Behaviour change: a session lives only while its agent runs
