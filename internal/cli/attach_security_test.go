@@ -171,7 +171,7 @@ func TestStartAttachDetachReattachExit(t *testing.T) {
 		t.Fatalf("a detached session must be listed as detached: %v\n%s", err, out)
 	}
 
-	// attach again without naming the session: the last attached one is the target
+	// attach again without naming the session: the most recently used one is the target
 	p2 := e.onPTY("attach")
 	p2.type_("echo r\"\"esult mark=$MARK en\"\"d\r")
 	p2.waitFor("result mark=survived end")
@@ -219,8 +219,8 @@ func TestExecOnATerminal(t *testing.T) {
 	}
 	sid := sidRe.FindString(out)
 
-	// no last-attached session and no --sid: the error lists what is running
-	if out, err := e.plain("exec", "--", "true"); err == nil || !strings.Contains(out, "no session targeted") || !strings.Contains(out, sid) {
+	// no --sid: the only session is the target, so the command gets as far as needing a terminal
+	if out, err := e.plain("exec", "--", "true"); err == nil || !strings.Contains(out, "needs a terminal") || strings.Contains(out, "no session") {
 		t.Errorf("exec without a target: %v\n%s", err, out)
 	}
 	p := e.onPTY("--sid", sid, "exec", "--", "sh", "-c", "echo in-sandbox:$(pwd):$(ls /workspaces); exit 4")
@@ -228,7 +228,7 @@ func TestExecOnATerminal(t *testing.T) {
 	if code := p.exitCode(); code != 4 {
 		t.Errorf("exec exit status %d, want 4", code)
 	}
-	// exec does not make the session the last attached one, and does not change its state
+	// exec is not use of the session and does not change its state
 	if out, _ := e.plain("list"); !strings.Contains(out, "idle") {
 		t.Errorf("an exec must not start the agent:\n%s", out)
 	}
@@ -318,4 +318,37 @@ func eventually(t *testing.T, what string, cond func() bool) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// 3.4: commands without a session id follow recency: stopping the most recent session moves them to the other.
+func TestCommandsFollowTheMostRecentSession(t *testing.T) {
+	e := newE2E(t)
+	start := func() string {
+		out, err := e.plain("start", "-d", "sh", "-c", "sleep 300")
+		if err != nil {
+			t.Fatalf("start: %v\n%s", err, out)
+		}
+		return sidRe.FindString(out)
+	}
+	a := start()
+	time.Sleep(1100 * time.Millisecond) // distinct start times
+	b := start()
+	if a == "" || b == "" || a == b {
+		t.Fatalf("sessions %q %q", a, b)
+	}
+	if out, err := e.plain("status"); err != nil || !strings.Contains(out, "session  "+b) {
+		t.Fatalf("status should target the newest session %s: %v\n%s", b, err, out)
+	}
+	if out, err := e.plain("stop", b); err != nil {
+		t.Fatalf("stop: %v\n%s", err, out)
+	}
+	if out, err := e.plain("status"); err != nil || !strings.Contains(out, "session  "+a) {
+		t.Fatalf("status should follow to %s: %v\n%s", a, err, out)
+	}
+	if out, err := e.plain("stop", a); err != nil {
+		t.Fatalf("stop: %v\n%s", err, out)
+	}
+	if out, err := e.plain("status"); err == nil || !strings.Contains(out, "no sessions running") {
+		t.Fatalf("nothing running: %v\n%s", err, out)
+	}
 }

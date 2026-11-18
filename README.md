@@ -43,7 +43,7 @@ mounts
   /workspaces/api  rw  (<dir>)
 tool roots  none
 ports       none
-env         HOME, LOGNAME, PATH, USER
+env         HOME, LANG, LOGNAME, PATH, USER
 $ isolait stop <sid>
 stopped <sid>
 $ isolait list
