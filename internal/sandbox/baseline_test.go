@@ -61,6 +61,9 @@ func TestBaselinePlanExposesOnlyWhatItShould(t *testing.T) {
 				t.Errorf("unexpected writable bind %+v", e)
 			}
 		case plan.RoBind:
+			if e.Src == "/dev/null" && strings.HasPrefix(e.Dst, "/proc/") {
+				break // a proc mask
+			}
 			if !strings.HasPrefix(e.Src, "/etc/") && !slices.Contains(SystemDirs, e.Src) && !strings.HasPrefix(e.Src, "/usr/") && !strings.HasPrefix(e.Src, "/nix/") {
 				t.Errorf("read-only bind of %q is neither a system dir nor minimal /etc", e.Src)
 			}

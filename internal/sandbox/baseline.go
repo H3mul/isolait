@@ -98,6 +98,9 @@ func BuildPlan(s Spec) (*plan.Plan, error) {
 	for _, e := range []plan.Entry{
 		{Kind: plan.Dev, Dst: "/dev"},
 		{Kind: plan.Proc, Dst: "/proc"},
+		// masked after /proc: the listing of kernel keyrings (the audit's F1; the keyctl calls are denied by seccomp)
+		{Kind: plan.RoBind, Src: "/dev/null", Dst: "/proc/keys"},
+		{Kind: plan.RoBind, Src: "/dev/null", Dst: "/proc/key-users"},
 		{Kind: plan.Tmpfs, Dst: "/tmp"},
 		{Kind: plan.Bind, Src: s.AgentHome, Dst: s.HostHome},
 		{Kind: plan.Bind, Src: s.Stage, Dst: Workspaces},

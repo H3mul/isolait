@@ -172,7 +172,10 @@ The starting directory at `/workspaces/<name>` (read-write, or read-only with `-
 (`HOME`, `USER`, `LOGNAME`, `PATH`, the locale and what you pass with `--env`). Your real home, `~/.ssh` and
 every other host path are not there. Hardening: no capabilities, new user, pid, ipc, uts, cgroup and network
 namespaces, nested user namespaces blocked unless `--allow-userns`. A session lives exactly as long as its agent
-process. Agents installed as launcher scripts are followed; `isolait stop` ends a session and
+process. A seccomp filter denies the calls a developer's tools do not need and an attacker does (kernel keyrings,
+`perf_event_open`, `bpf`, cross-process memory access, the mount family, kernel log); `io_uring` returns ENOSYS so
+runtimes fall back to epoll, and `/proc/keys` is masked. `perf` and `bpftrace` do not work in a session; `ptrace`
+(so `strace` and `gdb` on the agent's own processes) does. Agents installed as launcher scripts are followed; `isolait stop` ends a session and
 `isolait kill-server` ends every session. The full list, launcher-script rules and startup failure behaviour are in
 [docs/sandbox-internals.md](docs/sandbox-internals.md).
 

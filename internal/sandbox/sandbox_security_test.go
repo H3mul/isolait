@@ -16,6 +16,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/H3mul/isolait/internal/broker"
 	"github.com/H3mul/isolait/internal/initshim"
@@ -731,5 +734,64 @@ PY
 	}
 	if kv["ptrace_child"] != "0" {
 		t.Errorf("ptrace of a child: wait status %q, want 0 (ptrace must keep working)", kv["ptrace_child"])
+	}
+}
+
+// F1 of the 2026-11-18 audit: the sandbox shared the host user's kernel keyrings. Canary keys are created on the
+// host; from inside, /proc/keys must show none of them (masked) and keyctl must be refused (seccomp), and the
+// host keys must be unchanged afterwards. Each mechanism is also checked alone by its own assertion.
+func TestKeyringsAreNotSharedWithTheHost(t *testing.T) {
+	keyringUser := -4 // KEY_SPEC_USER_KEYRING
+	add := func(desc, payload string) int {
+		d, _ := syscall.BytePtrFromString(desc)
+		ty, _ := syscall.BytePtrFromString("user")
+		pl := []byte(payload)
+		id, _, e := syscall.Syscall6(unix.SYS_ADD_KEY, uintptr(unsafe.Pointer(ty)), uintptr(unsafe.Pointer(d)), uintptr(unsafe.Pointer(&pl[0])), uintptr(len(pl)), uintptr(keyringUser), 0)
+		if e != 0 {
+			t.Skipf("the host denies add_key: %v", e)
+		}
+		t.Cleanup(func() {
+			syscall.Syscall6(unix.SYS_KEYCTL, 3, id, 0, 0, 0, 0)                    // KEYCTL_REVOKE
+			syscall.Syscall6(unix.SYS_KEYCTL, 9, id, uintptr(keyringUser), 0, 0, 0) // KEYCTL_UNLINK
+		})
+		return int(id)
+	}
+	ids := []int{add("isolait-canary-default", "host-secret-1"), add("isolait-canary-open", "host-secret-2")}
+
+	nr := map[string]int{"amd64": 250, "arm64": 219}[runtime.GOARCH] // keyctl
+	if nr == 0 {
+		t.Skip("no syscall numbers for " + runtime.GOARCH)
+	}
+	script := fmt.Sprintf(`echo listing=$(cat /proc/keys | wc -c)
+python3 - <<'PY'
+import ctypes
+libc = ctypes.CDLL(None, use_errno=True)
+buf = ctypes.create_string_buffer(64)
+for i in (%d, %d):
+    r = libc.syscall(%d, 11, i, buf, 64)   # KEYCTL_READ
+    print('read%%d=%%d' %% (i, ctypes.get_errno()))
+libc.syscall(%d, 3, %d)                    # KEYCTL_REVOKE
+print('revoke=%%d' %% ctypes.get_errno())
+PY
+`, ids[0], ids[1], nr, nr, ids[0])
+	kv := runJob(t, job{Script: script})
+	if kv["listing"] != "0" {
+		t.Errorf("/proc/keys is not masked: it lists %q bytes", kv["listing"])
+	}
+	for _, id := range ids {
+		if kv["read"+strconv.Itoa(id)] != strconv.Itoa(int(syscall.EPERM)) {
+			t.Errorf("keyctl read of host key %d: errno %q, want EPERM", id, kv["read"+strconv.Itoa(id)])
+		}
+	}
+	if kv["revoke"] != strconv.Itoa(int(syscall.EPERM)) {
+		t.Errorf("keyctl revoke of a host key: errno %q, want EPERM", kv["revoke"])
+	}
+	// the host keys survived
+	for i, want := range []string{"host-secret-1", "host-secret-2"} {
+		buf := make([]byte, 64)
+		n, _, e := syscall.Syscall6(unix.SYS_KEYCTL, 11, uintptr(ids[i]), uintptr(unsafe.Pointer(&buf[0])), 64, 0, 0)
+		if e != 0 || string(buf[:n]) != want {
+			t.Errorf("host canary %d changed: %v %q", ids[i], e, buf[:n])
+		}
 	}
 }

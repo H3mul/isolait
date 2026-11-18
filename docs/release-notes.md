@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Hardening: syscall filter and keyring mask (audit-findings-hardening 1 and 2)
+
+- Every session now runs under a seccomp deny list (see `internal/sandbox/seccomp.go`, one comment per group);
+  `isolait status` shows `seccomp: on (<n> syscalls denied)`. Denied calls fail with EPERM, `io_uring` with ENOSYS.
+  `perf` and `bpftrace` stop working inside a session by design.
+- `/proc/keys` and `/proc/key-users` are masked: the sandbox no longer lists the host user's kernel keys.
+
 ### Behaviour change: a session lives only while its agent runs
 
 - Sessions no longer sit idle. When the agent (or shell) exits, the session ends and releases its mounts, ports and
