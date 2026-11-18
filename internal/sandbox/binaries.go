@@ -23,6 +23,8 @@ type BinOptions struct {
 	Home        string   // the user's real home, one of the places --inherit-path may take directories from
 	// InheritPrefixes overrides where --inherit-path may take directories from (tests); default /usr/local, /opt, Home.
 	InheritPrefixes []string
+	// Deny, when set, vets the directory of each launcher target before it is bound (the mount deny list).
+	Deny func(dir string) error
 }
 
 // Binaries is the resolved exposure: what to add to the plan, the sandbox PATH and what to tell the user.
@@ -84,6 +86,21 @@ func ResolveBinaries(o BinOptions) (Binaries, error) {
 		b.bind(m, real)
 		b.PathDirs = append(b.PathDirs, toolPath(real))
 		b.Warnings = append(b.Warnings, danglingLinks(real, m)...)
+	}
+
+	// targets of a launcher script, exposed like the agent's own install root
+	for _, t := range launcherTargets(resolved) {
+		if m.covers(t) {
+			continue
+		}
+		root := installRoot(t)
+		if o.Deny != nil {
+			if err := o.Deny(filepath.Dir(root)); err != nil {
+				return Binaries{}, fmt.Errorf("%s is a launcher script that runs %s: %w", agent, t, err)
+			}
+		}
+		b.bind(m, root)
+		b.Warnings = append(b.Warnings, fmt.Sprintf("warning: %s is a launcher script; also exposing %s", filepath.Base(agent), root))
 	}
 
 	// filtered host PATH, opt-in

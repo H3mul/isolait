@@ -145,3 +145,13 @@ func OpenSource(src string) (int, error) {
 	}
 	return fd, nil
 }
+
+// CheckPath vets the directory dir (symlinks followed) like a mount source.
+func (d *DenyList) CheckPath(dir string) error {
+	fd, err := OpenSource(dir)
+	if err != nil {
+		return err
+	}
+	defer syscall.Close(fd)
+	return d.Check(fd)
+}

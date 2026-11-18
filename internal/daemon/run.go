@@ -104,8 +104,12 @@ func Run(spec Spec) error {
 	}
 	defer syscall.Unmount(stage, syscall.MNT_DETACH) // error paths; the normal path unmounts before removing the directory
 
+	deny, err := mounts.NewDenyList([]string{spec.HostHome}, []string{spec.GlobalDir, spec.StateDir, spec.RuntimeBase})
+	if err != nil {
+		return err
+	}
 	bins, err := sandbox.ResolveBinaries(sandbox.BinOptions{Agent: spec.Agent[0], HostPath: spec.HostPath,
-		InheritPath: spec.InheritPath, Tools: spec.Tools, Home: spec.HostHome})
+		InheritPath: spec.InheritPath, Tools: spec.Tools, Home: spec.HostHome, Deny: deny.CheckPath})
 	if err != nil {
 		return err
 	}
@@ -127,10 +131,6 @@ func Run(spec Spec) error {
 		return err
 	}
 	if err := sandbox.AddBinaries(p, bins); err != nil {
-		return err
-	}
-	deny, err := mounts.NewDenyList([]string{spec.HostHome}, []string{spec.GlobalDir, spec.StateDir, spec.RuntimeBase})
-	if err != nil {
 		return err
 	}
 	masked, err := mounts.MountWorkspace(stage, spec.Name, spec.Workdir, spec.RO, empty, deny)

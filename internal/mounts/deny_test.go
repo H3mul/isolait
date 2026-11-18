@@ -105,3 +105,23 @@ func TestOpenSourceDescriptorIsStable(t *testing.T) {
 		t.Fatal("swapped symlink to an excluded directory was accepted")
 	}
 }
+
+func TestCheckPathRefusesInsideExcluded(t *testing.T) {
+	d := t.TempDir()
+	state, ok := filepath.Join(d, "state"), filepath.Join(d, "opt")
+	for _, p := range []string{filepath.Join(state, "bin"), ok} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dl, err := NewDenyList(nil, []string{state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dl.CheckPath(filepath.Join(state, "bin")); err == nil {
+		t.Error("a directory inside the state directory must be refused")
+	}
+	if err := dl.CheckPath(ok); err != nil {
+		t.Errorf("unrelated directory refused: %v", err)
+	}
+}

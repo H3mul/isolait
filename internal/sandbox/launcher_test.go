@@ -95,3 +95,55 @@ func TestLauncherNestedLoopAndLimits(t *testing.T) {
 		t.Errorf("count: %d targets, want 8", len(got))
 	}
 }
+
+// launcherFixture builds a wrapper in "sys" (made a system dir for the test) that execs a binary in "opt".
+func launcherFixture(t *testing.T) (wrapper, bin, sys string) {
+	d := realTemp(t)
+	sys = filepath.Join(d, "sys")
+	bin = filepath.Join(d, "opt/claude-code/bin/claude")
+	write(t, bin, "\x7fELF\x00", 0o755)
+	wrapper = filepath.Join(sys, "bin/claude")
+	write(t, wrapper, "#!/bin/sh\nexec "+bin+" \"$@\"\n", 0o755)
+	old := SystemDirs
+	SystemDirs = append([]string{sys}, old...)
+	t.Cleanup(func() { SystemDirs = old })
+	return
+}
+
+func TestLauncherInSystemDirExposesTarget(t *testing.T) {
+	wrapper, bin, _ := launcherFixture(t)
+	b, err := ResolveBinaries(BinOptions{Agent: "claude", HostPath: filepath.Dir(wrapper)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(b.Roots, []string{bin}) { // the file itself: its directory is a generic bin
+		t.Errorf("Roots %v, want [%s]", b.Roots, bin)
+	}
+	if len(b.Warnings) != 1 || !strings.Contains(b.Warnings[0], "launcher script; also exposing "+bin) {
+		t.Errorf("warnings %v", b.Warnings)
+	}
+}
+
+func TestLauncherTargetAlreadyMountedIsSilent(t *testing.T) {
+	wrapper, bin, _ := launcherFixture(t)
+	b, err := ResolveBinaries(BinOptions{Agent: "claude", HostPath: filepath.Dir(wrapper), Tools: []string{filepath.Dir(filepath.Dir(bin))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Warnings) != 0 || len(b.Roots) != 1 {
+		t.Errorf("roots %v warnings %v", b.Roots, b.Warnings)
+	}
+}
+
+func TestLauncherTargetRefusedByDenyList(t *testing.T) {
+	wrapper, bin, _ := launcherFixture(t)
+	var vetted string
+	deny := func(dir string) error { vetted = dir; return fmt.Errorf("refusing to mount a directory inside /state") }
+	_, err := ResolveBinaries(BinOptions{Agent: "claude", HostPath: filepath.Dir(wrapper), Deny: deny})
+	if err == nil || !strings.Contains(err.Error(), bin) || !strings.Contains(err.Error(), "refusing to mount a directory inside /state") {
+		t.Fatalf("err %v", err)
+	}
+	if vetted != filepath.Dir(bin) {
+		t.Errorf("vetted %q", vetted)
+	}
+}
