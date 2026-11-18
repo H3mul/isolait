@@ -75,6 +75,10 @@ line exists, its mutation in the same change.
 | 1.8 | End to end on a real pty: `leader :` opens the overlay, `status` shows this very session's status on one row, the prompt closes by itself, `attach` is refused, a dismissed `:stop` leaves the session running and the agent usable, and `:stop` really ends the session you are in | Spec: In-session command prompt | `cli.TestLeaderPromptInASession` | M57 | security |
 | 1.6 | The destination policy refuses loopback, RFC 1918, carrier-grade NAT, link-local, multicast, cloud-metadata space (named as such), unspecified and reserved ranges, documentation and benchmarking ranges, the host's own addresses and the gateway, and all IPv6; an IPv4-mapped IPv6 address is judged as the IPv4 address; allowed addresses next to each blocked range stay allowed; 200,000 random addresses agree with an independent reference | Decision 5 (dial-time policy) | `netd.TestPolicyTable`, `TestPolicyAgreesWithAReferenceOnRandomAddresses`, `TestBlockedErrorNamesTheAddress` | M61 to M65 | fast |
 | 1.6 | The policy also runs at dial time on the socket address actually connected, after name resolution (DNS rebinding: `localhost` resolves to loopback and is refused before any packet is sent); an unparsable address fails closed | Decision 5 | `netd.TestControlRefusesAtDialTimeAfterNameResolution`, `TestControlFailsClosedOnAnUnparsableAddress` | M60 | fast |
+| 1.6 | The TCP forwarder carries 4 MiB intact both ways, forwards half-closes, dials the upstream before the guest's handshake completes (a connect with a 700 ms upstream dial takes at least that long), and a refused upstream is a refused guest connect, not connect-then-reset | Decision 5 (dial-before-handshake) | `netd.TestTCPForwardsBothWaysIntact`, `TestHalfCloseIsForwarded`, `TestRefusedUpstreamIsARefusedGuestConnect`, `TestHandshakeCompletesOnlyAfterTheUpstreamAnswered` | M66 | fast |
+| 1.6 | At the engine: blocked destinations (private, metadata, CGNAT, host address, documentation) are refused without ever reaching the dialer; the gateway accepts only DNS; the connection limit holds and frees slots; the engine's own dialer enforces the policy at dial time | Decision 5; Spec: Private and local ranges blocked | `netd.TestBlockedDestinationsNeverReachTheDialer`, `TestGatewayAcceptsOnlyDNS`, `TestConnectionLimit`, `TestDefaultDialerRefusesLoopbackAtDialTime` | M67, M68, M72, M73 | fast |
+| 1.6 | DNS to the gateway over UDP and TCP is answered by the host resolver (a TCP guest gets a TCP upstream), the answer comes from the gateway so the host resolver's address is never exposed, malformed messages and responses are dropped without reaching the resolver, and a name whose answer is a private address resolves but the connection to it is refused | Spec: DNS resolution; Name resolving to a private address | `netd.TestDNSOverUDPIsAnsweredByTheHostResolver`, `TestDNSOverTCPIsAnswered`, `TestMalformedDNSIsDropped`, `TestNameResolvingToAPrivateAddressIsRefused`, `TestResolvConfParsing` | M71, M74 | fast |
+| 1.6 | Non-DNS UDP (to the gateway on another port, to a public address on 53 or any port) and ICMP echo are dropped and the stack never answers a ping for an address it does not own | Spec: Unsupported traffic dropped | `netd.TestNonDNSUDPIsDropped`, `TestICMPIsDropped` | M69, M70 | fast |
 
 ## Host-assumption canaries
 
@@ -91,7 +95,7 @@ line exists, its mutation in the same change.
 ## Mutations (`make mutations`)
 
 Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named tests must fail. Verified caught
-(65 of 65) on 2026-11-17.
+(74 of 74) on 2026-11-17.
 
 | Id | Regression | Must fail |
 |---|---|---|
@@ -160,6 +164,15 @@ Each mutation is applied by `scripts/mutations.py` to a scratch copy; the named 
 | M63 | The host's own addresses are allowed | `netd.TestPolicyTable` |
 | M64 | The metadata address is no longer named as such | `netd.TestPolicyTable` |
 | M65 | IPv6 destinations are allowed | `netd.TestPolicyTable` |
+| M66 | A refused upstream completes the guest's handshake | `netd.TestRefusedUpstreamIsARefusedGuestConnect` |
+| M67 | The engine skips the policy check before dialing | `netd.TestBlockedDestinationsNeverReachTheDialer` |
+| M68 | The gateway accepts TCP on any port | `netd.TestGatewayAcceptsOnlyDNS` |
+| M69 | UDP to anywhere is treated as DNS | `netd.TestNonDNSUDPIsDropped` |
+| M70 | ICMP is no longer dropped | `netd.TestICMPIsDropped` |
+| M71 | DNS messages are not validated | `netd.TestMalformedDNSIsDropped` |
+| M72 | The connection limit is not enforced | `netd.TestConnectionLimit` |
+| M73 | The engine's dialer has no dial-time policy | `netd.TestDefaultDialerRefusesLoopbackAtDialTime` |
+| M74 | A TCP DNS query is sent upstream over UDP | `netd.TestDNSOverTCPIsAnswered` |
 
 Not mutated on purpose: the `os.Getpid() == 1` guard before `kill(-1)` in the init shim (outside a PID namespace
 it would signal every process the user owns; `initshim.TestShutdownLeavesUnrelatedProcessesAlone` guards it). Not
@@ -170,8 +183,8 @@ credential read, and the 0700 runtime directory is the primary defence).
 
 | Spike | Assumption | Design decision | Lands with | Guard test (planned) |
 |---|---|---|---|---|
-| 1.6 | The user-space netstack forwards TCP and answers DNS; a refused upstream is a refused guest connect (the policy half is done, see the matrix) | Decision 5 | 5.3, 5.4 | `netd` engine tests; mutation: complete the handshake before dialing |
-| 1.6 | Non-DNS UDP, ICMP and IPv6 from the sandbox are dropped; the sandbox sees only the managed interface | Decision 5 | 5.2, 5.4 | security test; mutation: leave IPv6 enabled |
+| 1.6 | On the real kernel: the engine behind a real tap in the sandbox's netns forwards the sandbox's TCP and DNS | Decision 5 | 5.2, 5.6 | security tests |
+| 1.6 | IPv6 is disabled in the sandbox and the sandbox sees only the managed interface (non-DNS UDP and ICMP are done, see the matrix) | Decision 5 | 5.2 | security test; mutation: leave IPv6 enabled |
 | 1.7 | A port grant is a listener on the sandbox loopback forwarded to host `127.0.0.1`; reachable only after `allow`, refused after `deny`, other host services unreachable | Decision 5 | 7.1 to 7.3 | security test; mutation: listen before the grant |
 | 1.8 | A real Claude Code and OpenCode through the relay | Decision 4 | manual, `docs/manual-checks.md` | n/a |
 | 1.2, 1.9 | A busy workspace is reported with its blocking processes; `--force` detaches lazily; a protected path or any ancestor is refused by dev+inode, including after a symlink swap | Decisions 2, 3 | 6.1, 6.4, 6.7 | deny-list unit tests plus a security test; mutation: compare paths as strings |

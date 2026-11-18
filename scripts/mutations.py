@@ -158,6 +158,24 @@ M = [
      "./internal/netd", "TestPolicyTable", False, 60),
     ("M65", "internal/netd/policy.go", "if !a.Is4() {", "if false {",
      "./internal/netd", "TestPolicyTable", False, 60),
+    ("M66", "internal/netd/engine.go", 'e.cfg.Logf("tcp to %s:%d failed: %v", dst, port, err)\n\t\tr.Complete(true)', 'e.cfg.Logf("tcp to %s:%d failed: %v", dst, port, err)\n\t\tr.Complete(false)',
+     "./internal/netd", "TestRefusedUpstreamIsARefusedGuestConnect", False, 90),
+    ("M67", "internal/netd/engine.go", "if err := e.cfg.Policy.Check(dst); err != nil {", "if err := e.cfg.Policy.Check(dst); err != nil && false {",
+     "./internal/netd", "TestBlockedDestinationsNeverReachTheDialer", False, 90),
+    ("M68", "internal/netd/engine.go", "if port != 53 {", "if false {",
+     "./internal/netd", "TestGatewayAcceptsOnlyDNS", False, 90),
+    ("M69", "internal/netd/engine.go", "if dst.Unmap() != e.cfg.Gateway || id.LocalPort != 53 {", "if false && (dst.Unmap() != e.cfg.Gateway || id.LocalPort != 53) {",
+     "./internal/netd", "TestNonDNSUDPIsDropped", False, 90),
+    ("M70", "internal/netd/engine.go", "h[9] == 1 {", "h[9] == 255 {",
+     "./internal/netd", "TestICMPIsDropped", False, 90),
+    ("M71", "internal/netd/dns.go", "return qr == 0 && opcode == 0 && binary.BigEndian.Uint16(m[4:6]) >= 1", "_, _ = qr, opcode\n\treturn true",
+     "./internal/netd", "TestMalformedDNSIsDropped", False, 90),
+    ("M72", "internal/netd/engine.go", "make(chan struct{}, cfg.MaxConns)", "make(chan struct{}, cfg.MaxConns+100)",
+     "./internal/netd", "TestConnectionLimit", False, 90),
+    ("M73", "internal/netd/engine.go", "Control: p.Control}", "Control: nil}",
+     "./internal/netd", "TestDefaultDialerRefusesLoopbackAtDialTime", False, 90),
+    ("M74", "internal/netd/dns.go", "resp, err := e.cfg.Upstream.Exchange(ctx, q, true)", "resp, err := e.cfg.Upstream.Exchange(ctx, q, false)",
+     "./internal/netd", "TestDNSOverTCPIsAnswered", False, 90),
 ]
 
 
@@ -185,10 +203,10 @@ def run_one(work, m):
     took = time.time() - start
     if code == 0:
         return "SURVIVED", "tests passed with the mutation applied", took
-    if re.search(r"\[build failed\]|\[setup failed\]|^# ", out, re.M) and "--- FAIL" not in out:
+    if re.search(r"\[build failed\]|\[setup failed\]|^# ", out, re.M) and "--- FAIL" not in out and "panic:" not in out:
         return "BUILD", "the mutation does not compile:\n" + out[-600:], took
-    if "--- FAIL" in out or code == 124:
-        why = next((l.strip() for l in out.splitlines() if l.strip().startswith("--- FAIL")), "timed out (a hang counts as caught)")
+    if "--- FAIL" in out or "panic:" in out or code == 124:
+        why = next((l.strip() for l in out.splitlines() if l.strip().startswith("--- FAIL") or l.startswith("panic:")), "timed out (a hang counts as caught)")
         return "caught", why, took
     return "BUILD", "failed without a test failure:\n" + out[-600:], took
 
