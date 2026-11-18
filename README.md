@@ -4,10 +4,9 @@ Run AI coding agents (Claude Code, OpenCode, ...) in a rootless, zero-trust sand
 sandbox starts instantly, needs no root, no VM and no container runtime, and every permission the agent has is
 an explicit, user-granted, revocable grant.
 
-> **Status:** Phase 1 is in progress. Sessions, the sandbox baseline, resource limits and the control commands
-> below work. Attaching a terminal to the agent, hot-mounting more directories, network access and port grants
-> are the next steps, so for now `start` creates an *idle* session: the sandbox is up and verified, and the agent
-> is started when you attach.
+> **Status:** Phase 1 is in progress. Sessions, the sandbox baseline, resource limits, attaching a terminal to
+> the agent (detach, reattach, exec, the leader prompt) and the control commands below work. Hot-mounting more
+> directories, network access and port grants are the next steps, so the sandbox has no network device yet.
 
 ## Requirements
 
@@ -26,8 +25,9 @@ go build -o isolait .
 
 ## Quick start
 
-These examples are run by the test suite as written. `<sid>` is the session id, `<dir>` the project directory
-and `<age>` how long the session has been up.
+These examples are run by the test suite as written, from a script (so, not from a terminal: `start` then creates
+an *idle* session and does not attach; in a terminal it attaches, see [Attach, detach and exec](#attach-detach-and-exec)).
+`<sid>` is the session id, `<dir>` the project directory and `<age>` how long the session has been up.
 
 ```console
 $ isolait start sh
@@ -55,6 +55,7 @@ command:
 
 | Flag | Effect |
 |---|---|
+| `-d`, `--detach` | Start the session without attaching to it |
 | `--ro` | Mount the starting directory read-only |
 | `--env NAME` | Forward this host environment variable (repeatable) |
 | `--inherit-env` | Forward the whole host environment (agent sockets such as `SSH_AUTH_SOCK` are still withheld unless named with `--env`) |
@@ -66,8 +67,62 @@ state or runtime directory.
 
 ### Targeting a session
 
-`list`, `status` and `stop` take a session id (`isolait stop <sid>`), or `--sid <sid>`. Without either, the
-command acts on the last attached session; if there is none, it fails and lists the running sessions.
+`attach`, `exec`, `list`, `status` and `stop` take a session id (`isolait stop <sid>`), or `--sid <sid>`. Without
+either, the command acts on the last attached session; if there is none, it fails and lists the running sessions.
+
+## Attach, detach and exec
+
+Run in a terminal, `isolait start <agent>` starts the session and attaches your terminal to the agent. Sessions
+belong to a background daemon, so they survive the terminal:
+
+- **Detach** with the leader key then `d` (default leader: `Ctrl-\`). The agent keeps running and your shell is
+  back, with the terminal restored. If you close the terminal instead, the session simply carries on.
+- **`isolait attach [sid]`** attaches again, to the last attached session unless you name one. It shows the agent's
+  current screen at your current size: the agent is asked to repaint, and an agent that was on the alternate
+  screen is put back there. If the agent had exited, attaching starts it again in the same sandbox. One client is
+  attached to the agent at a time.
+- **`isolait exec [--sid sid] -- command [args...]`** runs a command in the session's sandbox on your terminal,
+  with the same mounts, environment and restrictions as the agent: a second shell, for example
+  `isolait exec -- bash`. It ends when the command ends, when you detach, or when you close the terminal.
+- When the agent or the exec'd command ends, `attach` and `exec` exit with its status (128 plus the signal number
+  for a killed process).
+
+`attach` and `exec` need a terminal. There is **no scrollback**: while attached, your terminal's own scrollback
+works as usual, but nothing that scrolled away is replayed when you reattach. Run `isolait attach` inside `tmux` or
+`screen` if you want scrollback across sessions.
+
+### The leader key
+
+| Keys | Effect |
+|---|---|
+| leader, `d` | Detach |
+| leader, `:` | Open the prompt (below) |
+| leader, leader | Send one literal leader byte to the agent |
+| leader, Escape | Cancel (the Escape is sent on, so an arrow key typed next is not garbled) |
+| leader, anything else | Ignored |
+
+The leader is recognised only in real keyboard input. Your terminal is kept in bracketed-paste mode, so text you
+paste is never mistaken for typed keys: a leader byte inside a paste is sent to the agent unchanged, and paste
+markers reach the agent only if it asked for them. Change the key with `leader` in the [config](docs/config.md).
+
+### The prompt
+
+Leader then `:` opens a one-line prompt on the bottom row and runs isolait commands against the session you are
+in, with the same arguments as on the command line (`status`, `list`, `stop`, and the mount and port commands as
+they arrive). Enter runs the command and shows the result on one row for a moment; Escape or Ctrl-C dismisses it.
+Commands that attach, start another session or are internal are refused. On a normal screen the prompt opens on
+the terminal's alternate screen, so the agent's screen is untouched when it closes; over an agent that is itself on
+the alternate screen it overwrites the bottom row and asks the agent to repaint. Agent output is held while the
+prompt is open and shown after it closes.
+
+### Terminal safety
+
+Agent output is filtered before it reaches your terminal. Clipboard writes (OSC 52), window and icon title changes,
+colour and other terminal queries (every OSC except hyperlinks), device control strings (DCS, such as sixel),
+application and privacy strings (APC, PM, SOS), window manipulation and its reports (`CSI ... t`) and the
+answerback request are dropped; colours, cursor movement, hyperlinks and the alternate screen pass unchanged.
+Sequences split across reads are handled. This is a filter, not a terminal emulator: it narrows what an agent can
+do to your terminal and does not claim to eliminate terminal injection.
 
 ## What the sandbox contains
 
