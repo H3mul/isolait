@@ -127,7 +127,11 @@ func Run(spec Spec) error {
 	if err := sandbox.AddBinaries(p, bins); err != nil {
 		return err
 	}
-	masked, err := mounts.MountWorkspace(stage, spec.Name, spec.Workdir, spec.RO, empty)
+	deny, err := mounts.NewDenyList([]string{spec.HostHome}, []string{spec.GlobalDir, spec.StateDir, spec.RuntimeBase})
+	if err != nil {
+		return err
+	}
+	masked, err := mounts.MountWorkspace(stage, spec.Name, spec.Workdir, spec.RO, empty, deny)
 	if err != nil {
 		return err
 	}
@@ -172,6 +176,13 @@ func Run(spec Spec) error {
 		box.Kill()
 		return err
 	}
+	hm := &hotMounts{stage: stage, empty: empty, plan: p, deny: deny, box: box}
+	if spec.RogueMount {
+		hm.beforeVerify = func() {
+			os.Mkdir(filepath.Join(stage, "rogue"), 0o755)
+			syscall.Mount("tmpfs", filepath.Join(stage, "rogue"), "tmpfs", 0, "")
+		}
+	}
 	exited := make(chan struct{})
 	go func() { box.Wait(); close(exited) }()
 	stopping := make(chan struct{})
@@ -182,6 +193,20 @@ func Run(spec Spec) error {
 			return "pong", nil
 		case "status":
 			return st.status(), nil
+		case "mount": // args: absolute source, name (may be empty), "ro" or "rw"
+			if len(r.Args) != 3 || !filepath.IsAbs(r.Args[0]) {
+				return nil, fmt.Errorf("mount needs an absolute source, a name and a mode")
+			}
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return hm.Add(r.Args[0], r.Args[1], r.Args[2] == "ro")
+		case "unmount": // args: name, "force" or ""
+			if len(r.Args) != 2 {
+				return nil, fmt.Errorf("unmount needs a name")
+			}
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return "unmounted", hm.Remove(r.Args[0], r.Args[1] == "force")
 		case "stop":
 			once.Do(func() { close(stopping) })
 			return "stopping", nil

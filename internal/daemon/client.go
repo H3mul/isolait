@@ -347,3 +347,28 @@ func age(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
+
+// AddMount mounts the host directory src into a running session as /workspaces/<name> (named after the
+// directory when name is empty). src must be absolute.
+func AddMount(base, id, src, name string, ro bool) (MountInfo, error) {
+	mode := "rw"
+	if ro {
+		mode = "ro"
+	}
+	resp, err := ctl.Call(session.SocketPath(base, id), ctl.Request{Op: "mount", Args: []string{src, name, mode}})
+	if err != nil {
+		return MountInfo{}, err
+	}
+	var mi MountInfo
+	return mi, json.Unmarshal(resp.Data, &mi)
+}
+
+// RemoveMount unmounts /workspaces/<name>; without force it refuses while sandbox processes use it.
+func RemoveMount(base, id, name string, force bool) error {
+	f := ""
+	if force {
+		f = "force"
+	}
+	_, err := ctl.Call(session.SocketPath(base, id), ctl.Request{Op: "unmount", Args: []string{name, f}})
+	return err
+}

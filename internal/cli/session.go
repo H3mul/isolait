@@ -196,7 +196,7 @@ func startCmd(d deps) *cobra.Command {
 				return err
 			}
 			spec := daemon.Spec{
-				ID: id, RuntimeBase: base, StateDir: p.StateDir, Workdir: wd, Name: mounts.NameFor(wd), RO: ro,
+				ID: id, RuntimeBase: base, GlobalDir: p.GlobalDir, StateDir: p.StateDir, Workdir: wd, Name: mounts.NameFor(wd), RO: ro,
 				Agent: args, HostEnv: os.Environ(), EnvNames: res.Config.Env, InheritEnv: res.Config.InheritEnv,
 				InheritPath: res.Config.InheritPath, Tools: res.Config.Tools, AllowUserns: res.Config.AllowUserns,
 				HostHome: home, HostPath: os.Getenv("PATH"), User: u.Username, UID: os.Getuid(), GID: os.Getgid(), InitExe: exe, Bwrap: bwrap,

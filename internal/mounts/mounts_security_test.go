@@ -93,7 +93,7 @@ func helper(root string, o *obs) {
 	src := mkSrc(root, "src")
 	must(syscall.Mount("tmpfs", filepath.Join(src, "sub"), "tmpfs", 0, ""))
 	must(os.WriteFile(filepath.Join(src, "sub", "hidden"), []byte("x"), 0o644))
-	masked, err := MountWorkspace(stage, "rw", src, false, empty)
+	masked, err := MountWorkspace(stage, "rw", src, false, empty, nil)
 	must(err)
 	o.RWMasked = masked
 	b, _ := os.ReadFile(filepath.Join(stage, "rw", "f"))
@@ -116,7 +116,7 @@ func helper(root string, o *obs) {
 
 	// read-only workspace
 	src2 := mkSrc(root, "src2")
-	_, err = MountWorkspace(stage, "ro", src2, true, empty)
+	_, err = MountWorkspace(stage, "ro", src2, true, empty, nil)
 	must(err)
 	err = os.WriteFile(filepath.Join(stage, "ro", "new"), nil, 0o644)
 	var pe *os.PathError
@@ -126,7 +126,7 @@ func helper(root string, o *obs) {
 	o.ROOpts = mountOpts(filepath.Join(stage, "ro"))
 
 	// collision
-	if _, err := MountWorkspace(stage, "rw", src2, false, empty); err != nil {
+	if _, err := MountWorkspace(stage, "rw", src2, false, empty, nil); err != nil {
 		o.CollisionErr = err.Error()
 	}
 
@@ -134,7 +134,7 @@ func helper(root string, o *obs) {
 	src3 := filepath.Join(root, "src3")
 	must(os.MkdirAll(src3, 0o755))
 	must(os.Symlink("/etc", filepath.Join(src3, ".isolait")))
-	if _, err := MountWorkspace(stage, "sym", src3, false, empty); err != nil {
+	if _, err := MountWorkspace(stage, "sym", src3, false, empty, nil); err != nil {
 		o.SymlinkErr = err.Error()
 	}
 	if _, err := os.Stat(filepath.Join(stage, "sym")); err == nil {
@@ -143,13 +143,13 @@ func helper(root string, o *obs) {
 	src4 := filepath.Join(root, "src4")
 	must(os.MkdirAll(src4, 0o755))
 	must(os.WriteFile(filepath.Join(src4, ".isolait"), []byte("file"), 0o644))
-	if _, err := MountWorkspace(stage, "isofile", src4, false, empty); err != nil {
+	if _, err := MountWorkspace(stage, "isofile", src4, false, empty, nil); err != nil {
 		o.IsolaitFileErr = err.Error()
 	}
 
 	// a mask target that cannot be mounted over rolls the workspace mount back
 	src5 := mkSrc(root, "src5")
-	if _, err := MountWorkspace(stage, "rollback", src5, false, filepath.Join(root, "does-not-exist")); err == nil {
+	if _, err := MountWorkspace(stage, "rollback", src5, false, filepath.Join(root, "does-not-exist"), nil); err == nil {
 		o.RollbackLeftover = true // should have failed
 	}
 	if _, err := os.Stat(filepath.Join(stage, "rollback")); err == nil {

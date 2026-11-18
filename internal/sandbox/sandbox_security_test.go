@@ -138,7 +138,7 @@ func helper() {
 	if w := j.Workspace; w != nil {
 		empty := filepath.Join(filepath.Dir(j.Spec.Stage), "empty")
 		os.MkdirAll(empty, 0o755)
-		masked, err := mounts.MountWorkspace(j.Spec.Stage, w.Name, w.Src, w.RO, empty)
+		masked, err := mounts.MountWorkspace(j.Spec.Stage, w.Name, w.Src, w.RO, empty, nil)
 		if err != nil {
 			fail(err)
 			return

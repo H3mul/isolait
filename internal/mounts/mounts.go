@@ -43,6 +43,11 @@ func Attach(src, dst string, ro bool) error {
 		return fmt.Errorf("open %s: %w", src, err)
 	}
 	defer syscall.Close(fd)
+	return attachFD(fd, src, dst, ro)
+}
+
+// attachFD is Attach for an already opened (and validated) source directory; name is for messages only.
+func attachFD(fd int, src, dst string, ro bool) error {
 	empty, _ := syscall.BytePtrFromString("")
 
 	tree, _, e := syscall.Syscall(sysOpenTree, uintptr(fd), uintptr(unsafe.Pointer(empty)), openTreeClone|syscall.O_CLOEXEC|atEmptyPath)
@@ -106,21 +111,29 @@ func Unmount(dst string) error { return syscall.Unmount(dst, syscall.MNT_DETACH)
 // and layers the empty read-only directory emptyDir over src/.isolait if there is one, so the sandbox never
 // sees the workspace's isolait config or state. It returns whether a mask was applied. On any failure
 // nothing stays mounted. An existing stage/name is a collision error.
-func MountWorkspace(stage, name, src string, ro bool, emptyDir string) (masked bool, err error) {
+func MountWorkspace(stage, name, src string, ro bool, emptyDir string, deny *DenyList) (masked bool, err error) {
 	if !ValidName(name) {
 		return false, fmt.Errorf("invalid workspace name %q", name)
 	}
-	real, err := filepath.EvalSymlinks(src)
+	fd, err := OpenSource(src)
 	if err != nil {
 		return false, err
 	}
-	hasIsolait, err := HasIsolaitDir(real)
+	defer syscall.Close(fd)
+	if deny != nil {
+		if err := deny.Check(fd); err != nil {
+			return false, err
+		}
+	}
+	// everything below goes through the descriptor, not the path
+	via := fmt.Sprintf("/proc/self/fd/%d", fd)
+	hasIsolait, err := HasIsolaitDir(via)
 	if err != nil {
 		return false, err
 	}
 	if hasIsolait {
-		if fi, err := os.Lstat(filepath.Join(real, ".isolait")); err != nil || !fi.IsDir() {
-			return false, fmt.Errorf("%s/.isolait is not a plain directory; refusing to mount a workspace whose isolait config cannot be masked", real)
+		if fi, err := os.Lstat(filepath.Join(via, ".isolait")); err != nil || !fi.IsDir() {
+			return false, fmt.Errorf("%s/.isolait is not a plain directory; refusing to mount a workspace whose isolait config cannot be masked", src)
 		}
 	}
 	dst := filepath.Join(stage, name)
@@ -130,7 +143,7 @@ func MountWorkspace(stage, name, src string, ro bool, emptyDir string) (masked b
 		}
 		return false, err
 	}
-	if err := Attach(real, dst, ro); err != nil {
+	if err := attachFD(fd, src, dst, ro); err != nil {
 		os.Remove(dst)
 		return false, err
 	}
